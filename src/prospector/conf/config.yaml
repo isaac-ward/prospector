@@ -1,5 +1,9 @@
 seed: 42
 
+
+# ----------------------------------------------------------------
+# Relating to the loading, processing, and plotting of the cave data
+# ----------------------------------------------------------------
 caves:
 
   chamber:
@@ -54,5 +58,27 @@ caves:
       obstacle_points:
         max_num: 20000
         alpha: 0.1
+
+
+
+# ----------------------------------------------------------------
+# Relating to the environment / simulation settings
+# ----------------------------------------------------------------
+environment:
+
+  max_episode_length: 1000
     
 
+# ----------------------------------------------------------------
+# Relating to the underlying physical dynamics models
+# ----------------------------------------------------------------
+dynamics:
+
+  dynamics_2d_linear:
+    dim_state: 2
+
+  dynamics_3d_linear:
+    dim_state: 3
+
+  dynamics_3d:
+    dim_state: 12

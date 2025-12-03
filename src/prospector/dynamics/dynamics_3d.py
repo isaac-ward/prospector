@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from .base_dynamics import BaseDynamics
 
 
-class DynamicsQuadcopter3D(BaseDynamics):
+class Dynamics3D(BaseDynamics):
     """
     12D rigid-body quadrotor in 3D using Euler angles (Z-Y-X, ψ θ φ).
 

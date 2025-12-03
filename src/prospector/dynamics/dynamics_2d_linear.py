@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from .base_dynamics import BaseDynamics
 
 
-class Dynamics2DSimple(BaseDynamics):
+class Dynamics2DLinear(BaseDynamics):
     """
     Super simple 2D point-mass dynamics for debugging.
 

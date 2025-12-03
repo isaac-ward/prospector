@@ -1,3 +1,5 @@
+# src/prospector/caves/cave_map_3d.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,8 +11,12 @@ import open3d as o3d
 
 from tqdm import tqdm
 
-from .utils.grid_ops import flood_fill_reachable, inflate_obstacles_nd, grid_astar
-
+from .utils.grid_ops import (
+    flood_fill_reachable,
+    inflate_obstacles_nd,
+    grid_astar,
+    sample_free_indices_with_min_distance,
+)
 
 @dataclass
 class CaveMap3D:
@@ -444,3 +450,42 @@ class CaveMap3D:
         """
         result = self.batch_has_line_of_sight([p0_world], [p1_world])
         return bool(result[0])
+
+    # ------------------------------------------------------------------ #
+    # Random free-point sampling (3D)                                    #
+    # ------------------------------------------------------------------ #
+    def sample_free_points(
+        self,
+        num_points: int,
+        min_distance: float,
+        *,
+        rng: Optional[np.random.Generator] = None,
+    ) -> np.ndarray:
+        """
+        Sample random world-space points in free-navigable 3D cells.
+
+        - Only cells with occupancy == 0 are considered.
+        - Points are returned at voxel centers in world coordinates.
+        - Enforces a minimum Euclidean separation of `min_distance` between
+          any pair of sampled points (in world units).
+
+        Typically you will call this after `label_accessible_space`, so that
+        inaccessible free cells (label 2) are excluded. If the sampler cannot
+        find a configuration that satisfies the constraints, a ValueError is
+        raised.
+        """
+        free_mask = self.occupancy == 0
+
+        idxs = sample_free_indices_with_min_distance(
+            free_mask=free_mask,
+            voxel_size=self.voxel_size,
+            num_points=num_points,
+            min_distance=min_distance,
+            rng=rng,
+        )
+
+        pts_world = np.stack(
+            [self.index_to_world_center(idx) for idx in idxs],
+            axis=0,
+        )
+        return pts_world

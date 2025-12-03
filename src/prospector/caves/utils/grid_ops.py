@@ -1,3 +1,5 @@
+# src/prospector/caves/utils/grid_ops.py
+
 from __future__ import annotations
 
 from collections import deque
@@ -240,3 +242,97 @@ def grid_astar(
 
     pbar.close()
     return None
+
+def sample_free_indices_with_min_distance(
+    free_mask: np.ndarray,
+    voxel_size: float,
+    num_points: int,
+    min_distance: float,
+    *,
+    rng: Optional[np.random.Generator] = None,
+) -> np.ndarray:
+    """
+    Sample voxel indices from a free-space mask with a minimum pairwise distance.
+
+    Parameters
+    ----------
+    free_mask : np.ndarray of bool
+        True where space is free-navigable (e.g. occupancy == 0).
+    voxel_size : float
+        Size of each voxel in world units (assumed isotropic).
+    num_points : int
+        Number of points to sample.
+    min_distance : float
+        Minimum allowed Euclidean distance between any pair of sampled points
+        in world units.
+    rng : np.random.Generator, optional
+        Optional NumPy RNG. If None, a default RNG is constructed.
+
+    Returns
+    -------
+    indices : (num_points, ndim) int array
+        Voxel indices in index space.
+
+    Raises
+    ------
+    ValueError
+        If num_points is invalid or if the sampler cannot find a configuration
+        satisfying the min_distance constraint given the free space.
+    """
+    free_mask = np.asarray(free_mask, dtype=bool)
+    ndim = free_mask.ndim
+
+    if num_points < 0:
+        raise ValueError(f"num_points must be non-negative, got {num_points}")
+    if num_points == 0:
+        return np.zeros((0, ndim), dtype=int)
+
+    # All candidate free voxels
+    candidates = np.argwhere(free_mask)
+    num_free = candidates.shape[0]
+
+    if num_points > num_free:
+        raise ValueError(
+            f"Requested {num_points} points but only {num_free} free voxels "
+            "are available."
+        )
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # If no distance constraint, just choose uniformly without replacement.
+    if min_distance <= 0.0:
+        idx = rng.choice(num_free, size=num_points, replace=False)
+        return candidates[idx].astype(int)
+
+    # Work in index space: distance in voxels.
+    min_dist_vox = float(min_distance) / float(voxel_size)
+    min_dist_sq_vox = min_dist_vox * min_dist_vox
+
+    # Randomize candidate order to avoid bias.
+    perm = rng.permutation(num_free)
+    shuffled = candidates[perm]
+
+    selected: list[np.ndarray] = []
+
+    for cand in shuffled:
+        if not selected:
+            selected.append(cand)
+        else:
+            sel_arr = np.stack(selected, axis=0)  # (k, ndim)
+            diffs = sel_arr - cand[None, :]       # (k, ndim)
+            d2 = np.sum(diffs * diffs, axis=1)    # squared distance in voxel units
+            if np.all(d2 >= min_dist_sq_vox):
+                selected.append(cand)
+
+        if len(selected) == num_points:
+            break
+
+    if len(selected) != num_points:
+        raise ValueError(
+            "Unable to sample the requested number of points with the given "
+            f"min_distance={min_distance:.3f} (voxel_size={voxel_size:.3f}, "
+            f"num_free={num_free})."
+        )
+
+    return np.stack(selected, axis=0).astype(int)

@@ -1,3 +1,5 @@
+# src/prospector/caves/cave_map_2d.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,8 +10,12 @@ import numpy as np
 import open3d as o3d
 from tqdm import tqdm
 
-from .utils.grid_ops import flood_fill_reachable, inflate_obstacles_nd, grid_astar
-
+from .utils.grid_ops import (
+    flood_fill_reachable,
+    inflate_obstacles_nd,
+    grid_astar,
+    sample_free_indices_with_min_distance,
+)
 
 @dataclass
 class CaveMap2D:
@@ -457,3 +463,44 @@ class CaveMap2D:
         """
         result = self.batch_has_line_of_sight([p0_world], [p1_world])
         return bool(result[0])
+    
+    # ------------------------------------------------------------------ #
+    # Random free-point sampling (2D)                                    #
+    # ------------------------------------------------------------------ #
+    def sample_free_points(
+        self,
+        num_points: int,
+        min_distance: float,
+        *,
+        rng: Optional[np.random.Generator] = None,
+    ) -> np.ndarray:
+        """
+        Sample random world-space points in free-navigable 2D cells.
+
+        - Only cells with occupancy == 0 are considered.
+        - Points are returned at voxel centers in world coordinates.
+        - Enforces a minimum Euclidean separation of `min_distance` between
+          any pair of sampled points (in world units).
+
+        This will typically be used after `label_accessible_space`, so that
+        unreachable free cells have label 2 and are automatically excluded.
+        If the request cannot be satisfied given the map and constraints,
+        a ValueError is raised.
+        """
+        free_mask = self.occupancy == 0
+
+        idxs = sample_free_indices_with_min_distance(
+            free_mask=free_mask,
+            voxel_size=self.voxel_size,
+            num_points=num_points,
+            min_distance=min_distance,
+            rng=rng,
+        )
+
+        # Map voxel indices to world-space voxel centers (with z = slice_z).
+        pts_world = np.stack(
+            [self.index_to_world_center(idx) for idx in idxs],
+            axis=0,
+        )
+        return pts_world
+
