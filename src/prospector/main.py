@@ -2,9 +2,8 @@
 import argparse
 import os
 import shutil
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, DictConfig
 import hydra
-from omegaconf import DictConfig
 import inspect
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)

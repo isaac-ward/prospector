@@ -1,0 +1,58 @@
+seed: 42
+
+caves:
+
+  chamber:
+    source: DARPA SubT Challenge Final Event
+    metadata: 
+     - key: DARPA SubT Section Number
+       value: 5
+    relative_path: "/src/assets/chamber.ply"
+    known_internal_xyz: [59.301, 105.96, 0.136567]
+    slice_for_2d:
+      z: -3.1
+      thickness: 0.1
+    voxel_size: 0.1
+    plotting:
+      obstacle_points:
+        max_num: 20000
+        alpha: 0.1
+
+  tunnels:
+    source: DARPA SubT Challenge Final Event
+    metadata: 
+      - key: DARPA SubT Section Number
+        value: 6
+    relative_path: "/src/assets/tunnels.ply"
+    known_internal_xyz: [29.1537, 39.3087, -2.45432]
+    slice_for_2d:
+      z: -2.25432
+      thickness: 0.1
+    voxel_size: 0.1
+    plotting:
+      obstacle_points:
+        max_num: 10000
+        alpha: 0.1
+
+  grapevine:
+    source: Stanford Expedition
+    metadata: 
+      - key: Expedition date
+        value: 24 May 2025
+      - key: Survey team
+        value:
+          - Isaac R. Ward
+          - Michelle Ho
+          - Maximilian Adang
+    relative_path: "/src/assets/grapevine.ply"
+    known_internal_xyz: [11.5246, 23.8243, -1.52496]
+    slice_for_2d:
+      z: null
+      thickness: 0.1
+    voxel_size: 0.05
+    plotting:
+      obstacle_points:
+        max_num: 20000
+        alpha: 0.1
+    
+
