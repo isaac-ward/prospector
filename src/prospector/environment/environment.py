@@ -450,7 +450,6 @@ class ProspectorEnvironment:
         """Per-agent alive mask, updated each step."""
         return self._alive
 
-    @property
     def all_tasks_completed(self) -> bool:
         """
         Returns True if all agents with tasks have completed their waypoints.

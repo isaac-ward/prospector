@@ -25,6 +25,11 @@ To run the project use:
 uv run python src/prospector/main.py
 uv run --env-file .env -- python -m prospector.tests.test_caves_matplotlib
 uv run --env-file .env -- python -m prospector.tests.test_simulation
+
+# For example, how to test with different parameters:
+uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=chamber
+uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=tu
+nnels
 ```
 
 # Citation

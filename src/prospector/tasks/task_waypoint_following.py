@@ -320,7 +320,6 @@ class TaskWaypointFollowing:
     def is_subtask_satisfied_fns(self) -> List[SubtaskSatisfiedFn]:
         return list(self._is_satisfied_fns)
     
-    @property
     def is_task_completed(self) -> bool:
         """
         Return True if all waypoints have been reached.
