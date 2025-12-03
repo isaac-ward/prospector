@@ -17,6 +17,7 @@ from .utils.grid_ops import (
     sample_free_indices_with_min_distance,
 )
 
+
 @dataclass
 class CaveMap2D:
     """
@@ -29,28 +30,29 @@ class CaveMap2D:
 
     Labels
     ------
-        0 : free & reachable from known_internal_xyz (projected to XY)
+        0 : free & reachable from known_internal_xy
         1 : obstacle
         2 : free but unreachable (free-inaccessible)
 
     World <-> grid mapping (2D)
     ---------------------------
-    Only x, y are used for index computation; z is ignored for occupancy:
+    We work purely in XY:
 
         rel_xy = (p_xy - grid_min_xy) / voxel_size
         idx_xy = floor(rel_xy)
 
-    For index -> world, we return:
+    For index -> world, we return XY voxel centers:
 
-        x, y from center of voxel;
-        z = slice_z            (mid-plane of the slice)
+        p_xy = grid_min_xy + (idx_xy + 0.5) * voxel_size
+
+    All public APIs for positions are strictly 2D (x, y).
     """
 
     voxel_size: float
     grid_min_xy: np.ndarray     # (2,)
     grid_max_xy: np.ndarray     # (2,)
-    slice_z: float              # central z of the slice
-    slice_thickness: float      # thickness used when constructing map
+    slice_z: float              # central z of the slice (metadata only)
+    slice_thickness: float      # thickness used when constructing map (metadata only)
     occupancy: np.ndarray       # (nx, ny) uint8, labels {0,1,2}
     ply_path: Path
 
@@ -68,22 +70,6 @@ class CaveMap2D:
     ) -> "CaveMap2D":
         """
         Build a 2D cave map from a thick z-slice of the PLY point cloud.
-
-        Parameters
-        ----------
-        ply_path : str or Path
-            Path to PLY obstacle point cloud.
-        voxel_size : float
-        slice_for_2d_z : float
-            Center z of the slice.
-        slice_for_2d_thickness : float
-            Slice thickness in z. Points with
-                |z - slice_for_2d_z| <= slice_for_2d_thickness / 2
-            are included.
-
-        Returns
-        -------
-        CaveMap2D
         """
         ply_path = Path(ply_path)
         if not ply_path.is_file():
@@ -96,6 +82,7 @@ class CaveMap2D:
         if points.size == 0:
             raise ValueError(f"Point cloud is empty: {ply_path}")
 
+        # Slice in Z, but after that we are purely 2D in XY.
         z = points[:, 2]
         half_thick = slice_for_2d_thickness * 0.5
         mask = np.abs(z - slice_for_2d_z) <= half_thick
@@ -163,13 +150,19 @@ class CaveMap2D:
         return_in_bounds_mask: bool = False,
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Batch map world points to 2D voxel indices (ix, iy), ignoring z.
+        Batch map world points to 2D voxel indices (ix, iy).
+
+        Expects points_world with shape (N, 2): [x, y].
         """
         pts = np.asarray(points_world, dtype=np.float64)
         pts = np.atleast_2d(pts)
-        xy = pts[:, :2]
 
-        rel = (xy - self.grid_min_xy[None, :]) / self.voxel_size
+        if pts.shape[1] != 2:
+            raise ValueError(
+                f"[CaveMap2D] batch_world_to_index expects shape (N,2), got {pts.shape}"
+            )
+
+        rel = (pts - self.grid_min_xy[None, :]) / self.voxel_size
         idx_f = np.floor(rel)
         idx = idx_f.astype(int)
 
@@ -197,8 +190,16 @@ class CaveMap2D:
     ) -> np.ndarray:
         """
         Single-point world -> 2D voxel index, via batch_world_to_index.
+
+        Expects a length-2 sequence [x, y].
         """
-        pts = np.asarray(point_world, dtype=np.float64)[None, :]
+        pts = np.asarray(point_world, dtype=np.float64).ravel()
+        if pts.shape[0] != 2:
+            raise ValueError(
+                f"[CaveMap2D] world_to_index expects length 2, got shape {pts.shape}"
+            )
+        pts = pts[None, :]  # (1, 2)
+
         idx, in_bounds = self.batch_world_to_index(
             pts, return_in_bounds_mask=True
         )
@@ -212,26 +213,31 @@ class CaveMap2D:
 
     def index_to_world_center(self, idx: Sequence[int]) -> np.ndarray:
         """
-        Convert 2D voxel indices to world coordinates at voxel center in XY,
-        and z = slice_z.
+        Convert 2D voxel indices to world coordinates at voxel center in XY.
+
+        Returns a 2D point [x, y].
         """
         idx = np.asarray(idx, dtype=np.float64)
+        if idx.shape[0] != 2:
+            raise ValueError(
+                f"[CaveMap2D] index_to_world_center expects length 2, got {idx}"
+            )
         xy = self.grid_min_xy + (idx + 0.5) * self.voxel_size
-        return np.array([xy[0], xy[1], self.slice_z], dtype=np.float64)
+        return np.array([xy[0], xy[1]], dtype=np.float64)
 
     # ------------------------------------------------------------------ #
     # Accessible-space labeling (2D flood fill)                          #
     # ------------------------------------------------------------------ #
-    def label_accessible_space(self, known_internal_xyz: Sequence[float]) -> None:
+    def label_accessible_space(self, known_internal_xy: Sequence[float]) -> None:
         """
         Label reachable/unreachable free space in the 2D map.
 
-        known_internal_xyz is projected to XY and used as the flood-fill start.
+        known_internal_xy must be [x, y].
         """
-        start_idx = self.world_to_index(known_internal_xyz, strict=True)
+        start_idx = self.world_to_index(known_internal_xy, strict=True)
         if self.occupancy[tuple(start_idx)] == 1:
             raise ValueError(
-                f"known_internal_xyz {known_internal_xyz} lies in obstacle voxel (2D)."
+                f"known_internal_xy {known_internal_xy} lies in obstacle voxel (2D)."
             )
 
         neighbors_4 = [
@@ -269,10 +275,24 @@ class CaveMap2D:
     # ------------------------------------------------------------------ #
     def batch_query_label(self, points_world: Sequence[Sequence[float]]) -> np.ndarray:
         """
-        Batch occupancy query in world coordinates (XY projected, z ignored).
+        Batch occupancy query in 2D world coordinates.
+
+        Expects an array of shape (N, 2) with [x, y].
+
+        Returns
+        -------
+        labels : (N,) int array
+            0 : free-navigable
+            1 : obstacle
+            2 : free-inaccessible or out-of-bounds
         """
         pts = np.asarray(points_world, dtype=np.float64)
         pts = np.atleast_2d(pts)
+
+        if pts.shape[1] != 2:
+            raise ValueError(
+                f"[CaveMap2D] batch_query_label expects shape (N,2), got {pts.shape}"
+            )
 
         idx, in_bounds = self.batch_world_to_index(
             pts, return_in_bounds_mask=True
@@ -288,6 +308,8 @@ class CaveMap2D:
     def query_label(self, point_world: Sequence[float]) -> int:
         """
         Single-point occupancy query, via batch_query_label.
+
+        Expects [x, y].
         """
         labels = self.batch_query_label([point_world])
         return int(labels[0])
@@ -302,7 +324,10 @@ class CaveMap2D:
         keep_out_radius: float = 0.0,
     ) -> np.ndarray:
         """
-        A* path between two free-navigable world-space points projected to 2D.
+        A* path between two free-navigable world-space points in 2D.
+
+        Inputs must be 2D [x, y].
+        Output is an array of shape (L, 2) of voxel-center XY coordinates.
 
         Raises if start/goal are not free-navigable (label != 0),
         or if no path is found.
@@ -378,11 +403,14 @@ class CaveMap2D:
         self,
         points0_world: Sequence[Sequence[float]],
         points1_world: Sequence[Sequence[float]],
+        verbose: bool = False,
     ) -> np.ndarray:
         """
-        2D line-of-sight: project endpoints to XY, ignore z.
+        2D line-of-sight: operate in XY only.
 
-        Obstacles (label == 1) block LoS. Free-inaccessible (2) does not.
+        - points0_world, points1_world must both be (N, 2) arrays.
+        - Obstacles (label == 1) block LoS.
+        - Free-inaccessible (2) does not.
 
         Returns
         -------
@@ -393,34 +421,40 @@ class CaveMap2D:
         p0 = np.atleast_2d(p0)
         p1 = np.atleast_2d(p1)
 
-        if p0.shape != p1.shape or p0.shape[1] != 3:
-            raise ValueError("points0_world and points1_world must have shape (N,3).")
+        if p0.shape != p1.shape:
+            raise ValueError(
+                "points0_world and points1_world must have the same shape."
+            )
+        if p0.shape[1] != 2:
+            raise ValueError(
+                f"[CaveMap2D] batch_has_line_of_sight expects shape (N,2), got {p0.shape}"
+            )
 
         n = p0.shape[0]
         los = np.zeros((n,), dtype=bool)
 
-        print("[CaveMap2D] Checking line-of-sight for point pairs (2D) ...")
-        for i in tqdm(range(n), desc="Line-of-sight (2D)", unit="pair"):
-            a = p0[i]
-            b = p1[i]
+        if verbose:
+            print("[CaveMap2D] Checking line-of-sight for point pairs (2D) ...")
 
-            # Project endpoints to XY and check bounds
+        for i in tqdm(range(n), desc="Line-of-sight (2D)", unit="pair", disable=not verbose):
+            a_xy = p0[i]
+            b_xy = p1[i]
+
+            # Endpoints must be in-bounds.
             _, mask_a = self.batch_world_to_index(
-                a[None, :], return_in_bounds_mask=True
+                a_xy[None, :], return_in_bounds_mask=True
             )
             _, mask_b = self.batch_world_to_index(
-                b[None, :], return_in_bounds_mask=True
+                b_xy[None, :], return_in_bounds_mask=True
             )
             if not (mask_a[0] and mask_b[0]):
                 los[i] = False
                 continue
 
-            a_xy = a[:2]
-            b_xy = b[:2]
             diff_xy = b_xy - a_xy
             length = float(np.linalg.norm(diff_xy))
             if length == 0.0:
-                label = self.query_label(a)
+                label = self.query_label(a_xy)
                 los[i] = label != 1
                 continue
 
@@ -428,18 +462,10 @@ class CaveMap2D:
             n_steps = int(np.ceil(length / step))
 
             t_vals = np.linspace(0.0, 1.0, n_steps + 1)
-            # Build 3D points with z irrelevant but required by signature
             pts_xy = a_xy[None, :] + t_vals[:, None] * diff_xy[None, :]
-            pts = np.column_stack(
-                [
-                    pts_xy[:, 0],
-                    pts_xy[:, 1],
-                    np.full((pts_xy.shape[0],), self.slice_z, dtype=np.float64),
-                ]
-            )
 
             idx, seg_in_bounds = self.batch_world_to_index(
-                pts, return_in_bounds_mask=True
+                pts_xy, return_in_bounds_mask=True
             )
             if not np.all(seg_in_bounds):
                 los[i] = False
@@ -460,10 +486,12 @@ class CaveMap2D:
     ) -> bool:
         """
         Single-pair LoS check, via batch_has_line_of_sight.
+
+        Expects 2D inputs [x, y].
         """
         result = self.batch_has_line_of_sight([p0_world], [p1_world])
         return bool(result[0])
-    
+
     # ------------------------------------------------------------------ #
     # Random free-point sampling (2D)                                    #
     # ------------------------------------------------------------------ #
@@ -478,7 +506,7 @@ class CaveMap2D:
         Sample random world-space points in free-navigable 2D cells.
 
         - Only cells with occupancy == 0 are considered.
-        - Points are returned at voxel centers in world coordinates.
+        - Points are returned at voxel centers in world coordinates (x, y).
         - Enforces a minimum Euclidean separation of `min_distance` between
           any pair of sampled points (in world units).
 
@@ -486,6 +514,10 @@ class CaveMap2D:
         unreachable free cells have label 2 and are automatically excluded.
         If the request cannot be satisfied given the map and constraints,
         a ValueError is raised.
+
+        Returns
+        -------
+        pts_world : (num_points, 2) array of [x, y] points.
         """
         free_mask = self.occupancy == 0
 
@@ -497,10 +529,81 @@ class CaveMap2D:
             rng=rng,
         )
 
-        # Map voxel indices to world-space voxel centers (with z = slice_z).
+        # Map voxel indices to world-space voxel centers in XY.
         pts_world = np.stack(
             [self.index_to_world_center(idx) for idx in idxs],
             axis=0,
         )
+
         return pts_world
 
+    # ------------------------------------------------------------------ #
+    # Collision check within a radius (2D)                               #
+    # ------------------------------------------------------------------ #
+    def is_collision_within_radius(
+        self,
+        world_coordinate: Sequence[float],
+        radius: float,
+    ) -> bool:
+        """
+        Treat the agent as a disk of radius `radius` in the XY plane and check
+        for collisions.
+
+        Inputs must be 2D [x, y].
+
+        Implementation
+        --------------
+        - Build a dense grid of sample points in XY around `world_coordinate`
+          with step ~= voxel_size.
+        - Keep only those samples whose Euclidean distance in XY is <= radius.
+        - Call `batch_query_label` once on this set.
+        - If any label != 0 (obstacle, unreachable, or out-of-bounds), we
+          treat it as a collision and return True.
+
+        Returns
+        -------
+        collision : bool
+            True if ANY sampled point within radius is not label 0.
+        """
+        radius = float(radius)
+        if radius <= 0.0:
+            # Degenerate radius: just check the voxel containing the point.
+            label = self.query_label(world_coordinate)
+            return label != 0
+
+        center = np.asarray(world_coordinate, dtype=np.float64).ravel()
+        if center.shape[0] != 2:
+            raise ValueError(
+                f"[CaveMap2D] is_collision_within_radius expects length 2, "
+                f"got shape {center.shape}"
+            )
+
+        cx, cy = center
+        step = float(self.voxel_size)
+
+        # Grid extents in each direction
+        num = int(np.ceil(2.0 * radius / step)) + 1
+        xs = np.linspace(cx - radius, cx + radius, num=num)
+        ys = np.linspace(cy - radius, cy + radius, num=num)
+        XX, YY = np.meshgrid(xs, ys, indexing="xy")
+
+        # Mask points outside the circle in XY
+        dx = XX - cx
+        dy = YY - cy
+        dist_sq = dx * dx + dy * dy
+        mask = dist_sq <= radius * radius
+
+        if not np.any(mask):
+            # Extremely small radius or numerical issues; fall back to single-point check.
+            label = self.query_label(center)
+            return label != 0
+
+        # Build (N,2) array of world points (XY only)
+        pts_xy = np.stack([XX[mask], YY[mask]], axis=-1)  # (N, 2)
+
+        labels = self.batch_query_label(pts_xy)
+        # label == 0 : free & reachable
+        # label == 1 : obstacle
+        # label == 2 : unreachable or out-of-bounds
+        # Any non-zero => we consider that a collision.
+        return bool(np.any(labels != 0))

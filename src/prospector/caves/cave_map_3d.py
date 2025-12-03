@@ -18,6 +18,7 @@ from .utils.grid_ops import (
     sample_free_indices_with_min_distance,
 )
 
+
 @dataclass
 class CaveMap3D:
     """
@@ -57,17 +58,6 @@ class CaveMap3D:
     ) -> "CaveMap3D":
         """
         Build a 3D cave map from a PLY point cloud.
-
-        Parameters
-        ----------
-        ply_path : str or Path
-            Path to PLY obstacle point cloud.
-        voxel_size : float
-            Side length of each cubic voxel (world units).
-
-        Returns
-        -------
-        CaveMap3D
         """
         ply_path = Path(ply_path)
         if not ply_path.is_file():
@@ -134,17 +124,6 @@ class CaveMap3D:
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Batch map world points to voxel indices.
-
-        Parameters
-        ----------
-        points_world : (N,3) array-like
-        return_in_bounds_mask : bool, optional
-            If True, also return (N,) bool mask of in-bounds points.
-
-        Returns
-        -------
-        indices : (N,3) int array
-        in_bounds : (N,) bool array or None
         """
         pts = np.asarray(points_world, dtype=np.float64)
         pts = np.atleast_2d(pts)
@@ -296,9 +275,6 @@ class CaveMap3D:
     ) -> np.ndarray:
         """
         A* path between two free-navigable world-space points.
-
-        Raises if start/goal are not free-navigable (label != 0),
-        or if no path is found.
         """
         start_label = self.query_label(start_world)
         goal_label = self.query_label(goal_world)
@@ -373,16 +349,13 @@ class CaveMap3D:
         self,
         points0_world: Sequence[Sequence[float]],
         points1_world: Sequence[Sequence[float]],
+        verbose: bool = False,
     ) -> np.ndarray:
         """
         Check unobstructed line of sight between pairs of world-space points.
 
         - Obstacles (label == 1) block LoS.
         - Free-inaccessible (2) does NOT block LoS.
-
-        Returns
-        -------
-        los : (N,) bool array
         """
         p0 = np.asarray(points0_world, dtype=np.float64)
         p1 = np.asarray(points1_world, dtype=np.float64)
@@ -395,8 +368,8 @@ class CaveMap3D:
         n = p0.shape[0]
         los = np.zeros((n,), dtype=bool)
 
-        print("[CaveMap3D] Checking line-of-sight for point pairs ...")
-        for i in tqdm(range(n), desc="Line-of-sight (3D)", unit="pair"):
+        if verbose: print("[CaveMap3D] Checking line-of-sight for point pairs ...")
+        for i in tqdm(range(n), desc="Line-of-sight (3D)", unit="pair", disable=not verbose):
             a = p0[i]
             b = p1[i]
 
@@ -489,3 +462,76 @@ class CaveMap3D:
             axis=0,
         )
         return pts_world
+
+    # ------------------------------------------------------------------ #
+    # Collision check within a radius (3D)                               #
+    # ------------------------------------------------------------------ #
+    def is_collision_within_radius(
+        self,
+        world_coordinate: Sequence[float],
+        radius: float,
+    ) -> bool:
+        """
+        Treat the agent as a sphere of radius `radius` and check for collisions.
+
+        Implementation
+        --------------
+        - Build a dense 3D grid of sample points around `world_coordinate`
+          with step ~= voxel_size in each dimension.
+        - Keep only those points whose Euclidean distance <= radius.
+        - Call `batch_query_label` once on this set.
+        - If any label != 0 (obstacle, unreachable, or out-of-bounds), we
+          treat it as a collision and return True.
+
+        Returns
+        -------
+        collision : bool
+            True if ANY sampled point within radius is not label 0.
+        """
+        radius = float(radius)
+        if radius <= 0.0:
+            label = self.query_label(world_coordinate)
+            return label != 0
+
+        center = np.asarray(world_coordinate, dtype=np.float64)
+        if center.shape[0] != 3:
+            raise ValueError(
+                f"world_coordinate must have length 3, got shape {center.shape}"
+            )
+
+        cx, cy, cz = center
+        step = float(self.voxel_size)
+
+        # Grid extents in each direction
+        num = int(np.ceil(2.0 * radius / step)) + 1
+        xs = np.linspace(cx - radius, cx + radius, num=num)
+        ys = np.linspace(cy - radius, cy + radius, num=num)
+        zs = np.linspace(cz - radius, cz + radius, num=num)
+
+        XX, YY, ZZ = np.meshgrid(xs, ys, zs, indexing="xy")
+
+        dx = XX - cx
+        dy = YY - cy
+        dz = ZZ - cz
+        dist_sq = dx * dx + dy * dy + dz * dz
+        mask = dist_sq <= radius * radius
+
+        if not np.any(mask):
+            # Extremely small radius or numerical issues; fall back to single-point check.
+            label = self.query_label(center)
+            return label != 0
+
+        pts_world = np.column_stack(
+            [
+                XX[mask].ravel(),
+                YY[mask].ravel(),
+                ZZ[mask].ravel(),
+            ]
+        )
+
+        labels = self.batch_query_label(pts_world)
+        # 0 : free & reachable
+        # 1 : obstacle
+        # 2 : unreachable or out-of-bounds
+        return bool(np.any(labels != 0))
+

@@ -225,7 +225,7 @@ class CaveMap3DPlotter:
         ax.set_xlabel("x [world]")
         ax.set_ylabel("y [world]")
         ax.set_aspect("equal")
-        ax.set_title(f"XY slice @ z-index {iz}")
+        ax.set_title(f"XY slice @ z-index {iz}\nabout agent=0")
 
         return img
 
@@ -272,7 +272,7 @@ class CaveMap3DPlotter:
         ax.set_xlabel("x [world]")
         ax.set_ylabel("z [world]")
         ax.set_aspect("equal")
-        ax.set_title(f"XZ slice @ y-index {iy}")
+        ax.set_title(f"XZ slice @ y-index {iy}\nabout agent=0")
 
         return img
 
@@ -319,6 +319,6 @@ class CaveMap3DPlotter:
         ax.set_xlabel("y [world]")
         ax.set_ylabel("z [world]")
         ax.set_aspect("equal")
-        ax.set_title(f"YZ slice @ x-index {ix}")
+        ax.set_title(f"YZ slice @ x-index {ix}\nabout agent=0")
 
         return img

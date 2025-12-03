@@ -1,4 +1,4 @@
-# Template Python Repository
+# Prospector
 
 # Prerequisites
 
@@ -24,6 +24,7 @@ To run the project use:
 ```bash
 uv run python src/prospector/main.py
 uv run --env-file .env -- python -m prospector.tests.test_caves_matplotlib
+uv run --env-file .env -- python -m prospector.tests.test_simulation
 ```
 
 # Citation

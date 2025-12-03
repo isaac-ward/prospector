@@ -40,3 +40,10 @@ class BasePolicy(ABC):
         action : (action_dim,) jnp.ndarray
         """
         raise NotImplementedError
+
+    def reset(self) -> None:
+        """
+        Optional hook for episode resets. Override if your policy needs
+        to clear internal state between episodes.
+        """
+        pass
