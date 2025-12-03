@@ -6,6 +6,7 @@ __pycache__/
 outputs/
 logs/
 saved/
+git-filter-repo.py
 
 # C extensions
 *.so

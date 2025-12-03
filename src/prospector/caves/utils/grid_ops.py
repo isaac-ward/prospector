@@ -6,12 +6,15 @@ from collections import deque
 from typing import Callable, Iterable, List, Sequence, Tuple, Optional
 
 import heapq
+import hashlib
 
 import numpy as np
 from tqdm import tqdm
 
+from prospector.utils.cacher import Cacher
 
 Index = Tuple[int, ...]
+
 
 def flood_fill_reachable(
     occupancy: np.ndarray,
@@ -243,6 +246,7 @@ def grid_astar(
     pbar.close()
     return None
 
+
 def sample_free_indices_with_min_distance(
     free_mask: np.ndarray,
     voxel_size: float,
@@ -254,6 +258,14 @@ def sample_free_indices_with_min_distance(
     """
     Sample voxel indices from a free-space mask with a minimum pairwise distance.
 
+    This version enforces BOTH:
+        - a minimum distance between sampled points, AND
+        - a minimum distance from any obstacle (non-free voxel).
+
+    It uses a Cacher to store/reuse the inflated obstacle mask, so the
+    expensive inflation is only done once per (occupancy pattern, voxel_size,
+    min_distance).
+
     Parameters
     ----------
     free_mask : np.ndarray of bool
@@ -263,7 +275,9 @@ def sample_free_indices_with_min_distance(
     num_points : int
         Number of points to sample.
     min_distance : float
-        Minimum allowed Euclidean distance between any pair of sampled points
+        Minimum allowed Euclidean distance between:
+          - any pair of sampled points, and
+          - any sampled point and any obstacle (non-free cell),
         in world units.
     rng : np.random.Generator, optional
         Optional NumPy RNG. If None, a default RNG is constructed.
@@ -287,24 +301,74 @@ def sample_free_indices_with_min_distance(
     if num_points == 0:
         return np.zeros((0, ndim), dtype=int)
 
-    # All candidate free voxels
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # ------------------------------------------------------------------
+    # Enforce min_distance to obstacles (non-free voxels), with caching.
+    # ------------------------------------------------------------------
+    if min_distance > 0.0:
+        # Non-free voxels are treated as obstacles for sampling.
+        obstacle_mask = ~free_mask
+
+        if np.any(obstacle_mask):
+            # Hash the obstacle mask so that the cache key depends on the
+            # *pattern* of free/obstacle, not just the shape.
+            # Convert to uint8 to get a compact, stable byte representation.
+            obstacle_bytes = obstacle_mask.astype(np.uint8).tobytes()
+            obstacle_hash = hashlib.sha1(obstacle_bytes).hexdigest()
+
+            cacher = Cacher(
+                computation_inputs=(
+                    "sampling_keepout_inflated_obstacles_v1",
+                    obstacle_hash,
+                    float(voxel_size),
+                    float(min_distance),
+                    tuple(free_mask.shape),
+                ),
+                tag="sampling_keepout",
+            )
+
+            if cacher.exists():
+                cache = cacher.load()
+                inflated_obstacles = cache["inflated_obstacles"]
+            else:
+                # Build a simple occupancy grid: 1 = obstacle, 0 = not obstacle.
+                occupancy_obstacles = obstacle_mask.astype(int)
+
+                inflated_obstacles = inflate_obstacles_nd(
+                    occupancy=occupancy_obstacles,
+                    voxel_size=voxel_size,
+                    keep_out_radius=min_distance,
+                    obstacle_value=1,
+                    tqdm_desc="Inflating obstacles for sampling keep-out",
+                )
+
+                cacher.save({"inflated_obstacles": inflated_obstacles})
+
+            # Shrink the free region: must be free AND outside the keep-out zone.
+            free_mask = free_mask & ~inflated_obstacles
+
+    # ------------------------------------------------------------------
+    # Candidate voxels after obstacle keep-out
+    # ------------------------------------------------------------------
     candidates = np.argwhere(free_mask)
     num_free = candidates.shape[0]
 
     if num_points > num_free:
         raise ValueError(
             f"Requested {num_points} points but only {num_free} free voxels "
-            "are available."
+            "are available after applying min_distance keep-out."
         )
 
-    if rng is None:
-        rng = np.random.default_rng()
-
-    # If no distance constraint, just choose uniformly without replacement.
+    # If no pairwise distance constraint, just choose uniformly without replacement.
     if min_distance <= 0.0:
         idx = rng.choice(num_free, size=num_points, replace=False)
         return candidates[idx].astype(int)
 
+    # ------------------------------------------------------------------
+    # Enforce pairwise min_distance between sampled points
+    # ------------------------------------------------------------------
     # Work in index space: distance in voxels.
     min_dist_vox = float(min_distance) / float(voxel_size)
     min_dist_sq_vox = min_dist_vox * min_dist_vox
@@ -332,7 +396,7 @@ def sample_free_indices_with_min_distance(
         raise ValueError(
             "Unable to sample the requested number of points with the given "
             f"min_distance={min_distance:.3f} (voxel_size={voxel_size:.3f}, "
-            f"num_free={num_free}). Try reducing agent_radius or min_distance."
+            f"num_free={num_free})."
         )
 
     return np.stack(selected, axis=0).astype(int)

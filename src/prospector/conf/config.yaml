@@ -5,7 +5,7 @@ simulation:
   # dynamics model to use: dynamics_2d_linear | dynamics_3d_linear | dynamics_3d
   dynamics_model: dynamics_3d_linear
   # cave to explore: chamber | tunnels | grapevine
-  cave: tunnels
+  cave: chamber
   agents:
     num_agents: 3
     policy: policy_random
