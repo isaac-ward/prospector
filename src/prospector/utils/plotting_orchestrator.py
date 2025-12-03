@@ -82,7 +82,12 @@ class PlottingOrchestrator:
             self.plotter_2d = CaveMap2DPlotter(self.cave_map_2d)
 
             # Create 2D figure + axes once
-            self.fig, self.ax2d = plt.subplots(figsize=(6 * figure_size_multiplier, 6 * figure_size_multiplier))
+            self.fig, self.ax2d = plt.subplots(
+                figsize=(
+                    6 * figure_size_multiplier,
+                    6 * figure_size_multiplier,
+                )
+            )
             self.fig.suptitle(f"{cave_name} – 2D occupancy")
             self.fig.tight_layout()
 
@@ -105,7 +110,12 @@ class PlottingOrchestrator:
             self.alpha_obstacles_3d = float(alpha_obstacles_3d)
 
             # Create 3D figure + GridSpec + axes once
-            self.fig = plt.figure(figsize=(10 * figure_size_multiplier, 12 * figure_size_multiplier))
+            self.fig = plt.figure(
+                figsize=(
+                    10 * figure_size_multiplier,
+                    12 * figure_size_multiplier,
+                )
+            )
             gs = GridSpec(4, 3, figure=self.fig)
 
             # Top 3 rows: 3D
@@ -218,6 +228,7 @@ class PlottingOrchestrator:
         agent_colors: np.ndarray,
         agent_alives: np.ndarray,
         agent_communications_matrix: Optional[np.ndarray] = None,
+        waypoint_positions: Optional[np.ndarray] = None,
     ) -> Path:
         """
         Render a single frame.
@@ -228,8 +239,13 @@ class PlottingOrchestrator:
         - agent_alives    : (N,) bool (True = alive, False = dead)
         - agent_communications_matrix : optional (N, N) bool / {0,1}
 
-        Dead agents are rendered as X markers in their color.
-        Alive agents are rendered as dots in their color.
+        Additionally (optional):
+        - waypoint_positions : (N, 2) or (N, 3) world coordinates for each
+          agent's *current* waypoint. These are drawn as large hollow circles
+          ("big O") in the agent's color. If None, no waypoint markers are drawn.
+
+        Dead agents are rendered as X markers in their color (with black outline).
+        Alive agents are rendered as filled circles with black outline.
 
         - In 2D mode: agents are drawn in XY.
         - In 3D mode: agents are drawn in 3D and projected onto XY/XZ/YZ slices.
@@ -241,6 +257,23 @@ class PlottingOrchestrator:
             agent_alives=agent_alives,
             agent_communications_matrix=agent_communications_matrix,
         )
+
+        # Normalize waypoint_positions if provided
+        if waypoint_positions is not None:
+            wp = np.asarray(waypoint_positions, dtype=float)
+            if wp.ndim != 2 or wp.shape[0] != positions.shape[0]:
+                raise ValueError(
+                    "waypoint_positions must have shape (N, D) with same N as "
+                    f"agent_positions; got {wp.shape}, expected "
+                    f"({positions.shape[0]}, D)"
+                )
+            if wp.shape[1] not in (2, 3):
+                raise ValueError(
+                    "waypoint_positions must be 2D or 3D points; "
+                    f"got D={wp.shape[1]}"
+                )
+        else:
+            wp = None
 
         if self.mode == "2d":
             # ---------------------------------------------------------- #
@@ -263,26 +296,65 @@ class PlottingOrchestrator:
             alive_mask = alives
             dead_mask = ~alives
 
-            # Alive agents: dots
+            # Alive (circle with black outline)
             if np.any(alive_mask):
                 ax.scatter(
                     xs[alive_mask],
                     ys[alive_mask],
                     c=colors[alive_mask],
-                    s=20,
+                    s=40,
                     marker="o",
+                    edgecolors="k",       # black outline
+                    linewidths=1.0,
+                    zorder=3,
                 )
 
-            # Dead agents: X markers
+            # Dead agents: X with black outline AND color fill
             if np.any(dead_mask):
+                # 1) Draw thick black X underneath
+                ax.scatter(
+                    xs[dead_mask],
+                    ys[dead_mask],
+                    c="black",
+                    s=60,
+                    marker="x",
+                    linewidths=3.0,       # thick: becomes the outline
+                    zorder=3,
+                )
+                # 2) Draw thinner colored X on top
                 ax.scatter(
                     xs[dead_mask],
                     ys[dead_mask],
                     c=colors[dead_mask],
-                    s=40,
+                    s=60,
                     marker="x",
-                    linewidths=1.5,
+                    linewidths=2.0,       # thin colored X
+                    zorder=4,             # ensure drawn on top
                 )
+
+            # Waypoint markers: big hollow circles ("O") in agent color
+            if wp is not None:
+                # Use XY only
+                if wp.shape[1] == 2:
+                    wx = wp[:, 0]
+                    wy = wp[:, 1]
+                else:
+                    wx = wp[:, 0]
+                    wy = wp[:, 1]
+
+                # mask invalid waypoints (NaNs)
+                valid_mask = np.isfinite(wx) & np.isfinite(wy)
+                if np.any(valid_mask):
+                    ax.scatter(
+                        wx[valid_mask],
+                        wy[valid_mask],
+                        s=200,
+                        facecolors="none",
+                        edgecolors=colors[valid_mask],
+                        linewidths=2.0,
+                        marker="o",
+                        zorder=2.5,
+                    )
 
             # Communications: dashed bicolor lines between communicating ALIVE pairs
             if comm is not None:
@@ -346,6 +418,25 @@ class PlottingOrchestrator:
         alive_mask = alives
         dead_mask = ~alives
 
+        # Handle waypoint positions in 3D (if provided)
+        if wp is not None:
+            if wp.shape[1] == 3:
+                wp3d = wp
+            else:
+                # Lift 2D waypoints into 3D using same z_default strategy
+                z_default = float(self.cave_map.grid_min[2])
+                wp3d = np.column_stack(
+                    [wp[:, 0], wp[:, 1], np.full(wp.shape[0], z_default)]
+                )
+            wx = wp3d[:, 0]
+            wy = wp3d[:, 1]
+            wz = wp3d[:, 2]
+            wp_valid_mask = np.isfinite(wx) & np.isfinite(wy) & np.isfinite(wz)
+        else:
+            wp3d = None
+            wp_valid_mask = None
+            wx = wy = wz = None  # for type checkers
+
         # Choose slice point as the FIRST agent's position (regardless of alive)
         slice_point = positions3d[0]
 
@@ -366,7 +457,7 @@ class PlottingOrchestrator:
             clear=False,
         )
 
-        # Alive agents: dots
+        # Alive agents: circles with black outline (3D + projections)
         if np.any(alive_mask):
             xs_alive = xs[alive_mask]
             ys_alive = ys[alive_mask]
@@ -379,35 +470,172 @@ class PlottingOrchestrator:
                 ys_alive,
                 zs_alive,
                 c=colors_alive,
-                s=20,
+                s=40,
                 marker="o",
-                depthshade=True,
+                edgecolors="k",
+                linewidths=1,
+                depthshade=False,
             )
             # Projections
-            ax_xy.scatter(xs_alive, ys_alive, c=colors_alive, s=10, marker="o")
-            ax_xz.scatter(xs_alive, zs_alive, c=colors_alive, s=10, marker="o")
-            ax_yz.scatter(ys_alive, zs_alive, c=colors_alive, s=10, marker="o")
+            ax_xy.scatter(
+                xs_alive,
+                ys_alive,
+                c=colors_alive,
+                s=25,
+                marker="o",
+                edgecolors="k",
+                linewidths=1,
+            )
+            ax_xz.scatter(
+                xs_alive,
+                zs_alive,
+                c=colors_alive,
+                s=25,
+                marker="o",
+                edgecolors="k",
+                linewidths=1,
+            )
+            ax_yz.scatter(
+                ys_alive,
+                zs_alive,
+                c=colors_alive,
+                s=25,
+                marker="o",
+                edgecolors="k",
+                linewidths=1,
+            )
 
-        # Dead agents: X markers
+        # Dead agents: X markers with black outline hack (3D + projections)
         if np.any(dead_mask):
             xs_dead = xs[dead_mask]
             ys_dead = ys[dead_mask]
             zs_dead = zs[dead_mask]
             colors_dead = colors[dead_mask]
 
+            # 3D: black X under, colored X on top
+            ax3d.scatter(
+                xs_dead,
+                ys_dead,
+                zs_dead,
+                c="black",
+                s=70,
+                marker="x",
+                depthshade=False,
+                linewidths=3.0,
+            )
             ax3d.scatter(
                 xs_dead,
                 ys_dead,
                 zs_dead,
                 c=colors_dead,
-                s=40,
+                s=70,
                 marker="x",
-                depthshade=True,
-                linewidths=1.5,
+                depthshade=False,
+                linewidths=2.0,
             )
-            ax_xy.scatter(xs_dead, ys_dead, c=colors_dead, s=30, marker="x", linewidths=1.5)
-            ax_xz.scatter(xs_dead, zs_dead, c=colors_dead, s=30, marker="x", linewidths=1.5)
-            ax_yz.scatter(ys_dead, zs_dead, c=colors_dead, s=30, marker="x", linewidths=1.5)
+
+            # XY projection
+            ax_xy.scatter(
+                xs_dead,
+                ys_dead,
+                c="black",
+                s=50,
+                marker="x",
+                linewidths=3.0,
+            )
+            ax_xy.scatter(
+                xs_dead,
+                ys_dead,
+                c=colors_dead,
+                s=50,
+                marker="x",
+                linewidths=2.0,
+            )
+
+            # XZ projection
+            ax_xz.scatter(
+                xs_dead,
+                zs_dead,
+                c="black",
+                s=50,
+                marker="x",
+                linewidths=3.0,
+            )
+            ax_xz.scatter(
+                xs_dead,
+                zs_dead,
+                c=colors_dead,
+                s=50,
+                marker="x",
+                linewidths=2.0,
+            )
+
+            # YZ projection
+            ax_yz.scatter(
+                ys_dead,
+                zs_dead,
+                c="black",
+                s=50,
+                marker="x",
+                linewidths=3.0,
+            )
+            ax_yz.scatter(
+                ys_dead,
+                zs_dead,
+                c=colors_dead,
+                s=50,
+                marker="x",
+                linewidths=2.0,
+            )
+
+        # Waypoints in 3D: big hollow circles ("O") in agent color
+        if wp3d is not None and wp_valid_mask is not None and np.any(wp_valid_mask):
+            wx_valid = wx[wp_valid_mask]
+            wy_valid = wy[wp_valid_mask]
+            wz_valid = wz[wp_valid_mask]
+            colors_valid = colors[wp_valid_mask]
+
+            # 3D hollow circles
+            ax3d.scatter(
+                wx_valid,
+                wy_valid,
+                wz_valid,
+                s=110,
+                facecolors="none",
+                edgecolors=colors_valid,
+                linewidths=1.5,
+                marker="o",
+                depthshade=False,
+            )
+
+            # Projections
+            ax_xy.scatter(
+                wx_valid,
+                wy_valid,
+                s=80,
+                facecolors="none",
+                edgecolors=colors_valid,
+                linewidths=1.5,
+                marker="o",
+            )
+            ax_xz.scatter(
+                wx_valid,
+                wz_valid,
+                s=80,
+                facecolors="none",
+                edgecolors=colors_valid,
+                linewidths=1.5,
+                marker="o",
+            )
+            ax_yz.scatter(
+                wy_valid,
+                wz_valid,
+                s=80,
+                facecolors="none",
+                edgecolors=colors_valid,
+                linewidths=1.5,
+                marker="o",
+            )
 
         # Communications: dashed bicolor lines between communicating ALIVE pairs
         if comm is not None:
@@ -478,7 +706,7 @@ class PlottingOrchestrator:
         ----------
         output_name : optional str
             Base name (without extension) for the output MP4. If None, we
-            default to f"{cave_name}_{mode}.mp4".
+            default to f"{self.cave_name}_{self.mode}.mp4".
 
         Returns
         -------

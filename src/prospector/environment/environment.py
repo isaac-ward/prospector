@@ -13,6 +13,7 @@ from ..agents.agent_multi import MultiAgent
 from ..caves.cave_map_2d import CaveMap2D
 from ..caves.cave_map_3d import CaveMap3D
 from ..utils.plotting_orchestrator import PlottingOrchestrator
+from ..tasks.task_waypoint_following import TaskWaypointFollowing
 
 
 AliveFn = Callable[[jnp.ndarray], bool]
@@ -28,7 +29,7 @@ class ProspectorEnvironment:
     - Ask the agent(s) for actions each step.
     - Advance the state using the provided `BaseDynamics` instance.
     - Track a simple step counter and per-agent "alive" / "done" flags.
-    - Return reward (currently zeros) and a debug/info dict.
+    - Return reward (optionally from TaskWaypointFollowing objects) and info.
     - Optionally manage rendering via an internal PlottingOrchestrator when
       `render=True`.
     """
@@ -41,10 +42,12 @@ class ProspectorEnvironment:
         initial_state: jnp.ndarray,
         config: Any,
         *,
+
         render: bool = False,
         log_dir: Optional[str | Path] = None,
         cave_name: Optional[str] = None,
         agent_colors: Optional[np.ndarray] = None,
+        tasks: Optional[Sequence[TaskWaypointFollowing]] = None,
     ) -> None:
         """
         Parameters
@@ -69,6 +72,10 @@ class ProspectorEnvironment:
             required if render=True).
         agent_colors  : (num_agents,) array-like, optional
             Per-agent colors for plotting (required if render=True).
+        tasks         : sequence of TaskWaypointFollowing, optional
+            One task object per agent, used for reward computation and
+            waypoint progression. If provided, len(tasks) must equal
+            num_agents.
         """
         self._dynamics = dynamics
         self._cave_map = cave_map
@@ -90,6 +97,29 @@ class ProspectorEnvironment:
 
         # Initialize agent histories with the initial state.
         self._agents.reset(self._state)
+
+        num_agents = self._agents.num_agents
+
+        # ------------------------------------------------------------------ #
+        # Optional tasks (waypoint following, one per agent)                 #
+        # ------------------------------------------------------------------ #
+        if tasks is not None:
+            if len(tasks) != num_agents:
+                raise ValueError(
+                    f"Length of tasks ({len(tasks)}) must match num_agents ({num_agents})."
+                )
+            self._tasks: Optional[List[TaskWaypointFollowing]] = list(tasks)
+            # Environment-side histories per agent, for task rewards
+            self._state_history: List[List[jnp.ndarray]] = [
+                [self._state[i]] for i in range(num_agents)
+            ]
+            self._action_history: List[List[jnp.ndarray]] = [
+                [] for _ in range(num_agents)
+            ]
+        else:
+            self._tasks = None
+            self._state_history = []
+            self._action_history = []
 
         # ------------------------------------------------------------------ #
         # Optional rendering setup                                           #
@@ -170,6 +200,20 @@ class ProspectorEnvironment:
         self._agents.reset(self._state)
         self._step_index = 0
         self._alive = jnp.ones((self._agents.num_agents,), dtype=bool)
+
+        # Reset env-side histories if we have tasks
+        if self._tasks is not None:
+            num_agents = self._agents.num_agents
+            self._state_history = [
+                [self._state[i]] for i in range(num_agents)
+            ]
+            self._action_history = [
+                [] for _ in range(num_agents)
+            ]
+        else:
+            self._state_history = []
+            self._action_history = []
+
         return self._state
 
     def step(self) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, Dict[str, Any]]:
@@ -231,6 +275,12 @@ class ProspectorEnvironment:
         # 3) Update histories on the agent side.
         self._agents.update_history(next_state, actions)
 
+        # 3b) Update env-side histories for each agent (for task rewards)
+        if self._tasks is not None:
+            for i in range(num_agents):
+                self._action_history[i].append(jnp.asarray(actions[i]))
+                self._state_history[i].append(jnp.asarray(next_state[i]))
+
         # 4) Update environment state and step index.
         self._state = next_state
         self._step_index += 1
@@ -244,8 +294,58 @@ class ProspectorEnvironment:
 
         done = jnp.asarray(done_list, dtype=bool)
 
-        # 6) Reward (currently zero for all agents).
-        reward = jnp.zeros((num_agents,), dtype=jnp.float32)
+        # 6) Reward: task-based if tasks provided, else zeros.
+        if self._tasks is not None:
+            reward = jnp.zeros((num_agents,), dtype=jnp.float32)
+            current_subtasks: List[int] = []
+            current_waypoints_list: List[np.ndarray] = []
+
+            for i in range(num_agents):
+                task_i = self._tasks[i]
+                if task_i is None:
+                    current_subtasks.append(-1)
+                    current_waypoints_list.append(
+                        np.full(len(self.position_dims), np.nan, dtype=float)
+                    )
+                    continue
+
+                # Full history for agent i
+                history_states = jnp.stack(self._state_history[i], axis=0)
+                if self._action_history[i]:
+                    history_actions = jnp.stack(self._action_history[i], axis=0)
+                else:
+                    history_actions = jnp.zeros(
+                        (0, actions.shape[1]), dtype=jnp.float32
+                    )
+
+                # Update waypoint index from current state
+                task_i.update_subtask_from_state(next_state[i])
+
+                # Reward for active waypoint
+                r_i = task_i.reward_for_active_subtask(
+                    history_states, history_actions
+                )
+                reward = reward.at[i].set(jnp.asarray(r_i, dtype=jnp.float32))
+                current_subtasks.append(task_i.current_subtask_idx)
+
+                # Current waypoint position for plotting
+                wp = np.asarray(task_i.current_waypoint, dtype=float)
+                # Ensure dimensionality matches position_dims length
+                if wp.shape[0] < len(self.position_dims):
+                    wp = np.pad(
+                        wp,
+                        (0, len(self.position_dims) - wp.shape[0]),
+                        constant_values=0.0,
+                    )
+                elif wp.shape[0] > len(self.position_dims):
+                    wp = wp[: len(self.position_dims)]
+                current_waypoints_list.append(wp)
+
+            waypoint_positions = np.stack(current_waypoints_list, axis=0)
+        else:
+            reward = jnp.zeros((num_agents,), dtype=jnp.float32)
+            current_subtasks = []
+            waypoint_positions = None
 
         # 7) Communications matrix (line of sight).
         comms_matrix = np.zeros((num_agents, num_agents), dtype=np.int8)
@@ -270,6 +370,10 @@ class ProspectorEnvironment:
             "communications_matrix": comms_matrix,
         }
 
+        if self._tasks is not None:
+            info["current_subtask_idx"] = current_subtasks
+            info["current_waypoints"] = waypoint_positions
+
         # 8) Optional rendering
         if self._render and self._orch is not None and self._agent_colors is not None:
             agent_positions = np.asarray(
@@ -286,6 +390,7 @@ class ProspectorEnvironment:
                 agent_colors=self._agent_colors,
                 agent_alives=alive_mask,
                 agent_communications_matrix=comms_matrix,
+                waypoint_positions=waypoint_positions,
             )
 
         return self._state, reward, done, info
@@ -344,3 +449,20 @@ class ProspectorEnvironment:
     def alive_mask(self) -> jnp.ndarray:
         """Per-agent alive mask, updated each step."""
         return self._alive
+
+    @property
+    def all_tasks_completed(self) -> bool:
+        """
+        Returns True if all agents with tasks have completed their waypoints.
+        If no tasks are defined, returns False.
+        """
+        if self._tasks is None:
+            return False
+
+        for task in self._tasks:
+            if task is None:
+                continue
+            if not task.is_task_completed():
+                return False
+
+        return True

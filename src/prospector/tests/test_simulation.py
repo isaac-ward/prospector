@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import numpy as np
 import jax.numpy as jnp
@@ -24,9 +24,11 @@ from prospector.dynamics.dynamics_3d import Dynamics3D
 
 from prospector.agents.initial_states import sample_initial_states
 from prospector.agents.policies.policy_random import PolicyRandom
+from prospector.agents.policies.policy_mppi import PolicyMPPI
 from prospector.agents.agent_multi import MultiAgent
 from prospector.agents.colors import get_agent_color_list
 from prospector.environment.environment import ProspectorEnvironment
+from prospector.tasks.task_waypoint_following import TaskWaypointFollowing
 
 
 _DYNAMICS_REGISTRY: Dict[str, Any] = {
@@ -61,7 +63,7 @@ def main(args: DictConfig):
     policy_name: str = sim_cfg.agents.policy
 
     # Seed
-    seed = int(getattr(args, "seed", 42))
+    seed = args.seed
     rng = np.random.default_rng(seed)
     print(f"[test_simulation] Using seed: {seed}")
 
@@ -85,9 +87,9 @@ def main(args: DictConfig):
     dyn_cfg = args.dynamics[dynamics_name]
 
     dt = float(dyn_cfg.dt)
-    physical_parameters = dict(getattr(dyn_cfg, "physical_parameters", {}))
+    #physical_parameters = dyn_cfg.physical_parameters
 
-    dynamics = dyn_class(dt=dt, physical_parameters=physical_parameters or None)
+    dynamics = dyn_class(dt=dt)
 
     state_dim = int(dyn_cfg.state_dim)
     action_dim = int(dyn_cfg.action_dim)
@@ -136,24 +138,91 @@ def main(args: DictConfig):
     print(f"[test_simulation] Initial world position(s): {start_points}")
 
     # ------------------------------------------------------------------ #
-    # Instantiate policy, agents, environment                            #
+    # Instantiate per-agent waypoint tasks                               #
     # ------------------------------------------------------------------ #
-    if policy_name != "policy_random":
-        raise ValueError(
-            f"Only 'policy_random' is supported currently, got '{policy_name}'."
-        )
+    num_waypoints = sim_cfg.num_waypoints
+    agent_radius = float(args.agents.agent_radius)
 
-    policy = PolicyRandom(
-        action_dim=action_dim,
-        action_limits=action_limits,
-    )
+    # Reward hyperparameters from config
+    rw_cfg = args.rewards.waypoint_following
+    distance_weight = float(rw_cfg.distance_weight)
+    control_weight = float(rw_cfg.control_effort_weight)
+    collision_penalty = float(rw_cfg.collision_penalty)
+
+    tasks: List[TaskWaypointFollowing] = []
+
+    for agent_idx in range(num_agents):
+        # Sample waypoints in free space; ensure some separation
+        waypoint_points_world = cave_map.sample_free_points(
+            num_points=num_waypoints,
+            min_distance=agent_radius * 2.0,
+            rng=rng,
+        )  # shape (num_waypoints, world_dim)
+
+        # Compress world coords to state position dimensions
+        waypoint_points_task = waypoint_points_world[:, position_dims]
+
+        task = TaskWaypointFollowing(
+            waypoints=waypoint_points_task,
+            dynamics=dynamics,
+            cave_map=cave_map,
+            agent_radius=agent_radius,
+            distance_weight=distance_weight,
+            control_weight=control_weight,
+            collision_penalty=collision_penalty,
+            multiplier_within_radius_of_goal=args.rewards.waypoint_following.multiplier_within_radius_of_goal,
+        )
+        tasks.append(task)
+
+    print("[test_simulation] Waypoints per agent (task coords):")
+    for i, task in enumerate(tasks):
+        # this attribute name matches the implementation we wrote earlier
+        print(f"  agent {i}: {np.asarray(task._waypoints)}")  # type: ignore[attr-defined]
+
+    # ------------------------------------------------------------------ #
+    # Instantiate per-agent policies + MultiAgent                        #
+    # ------------------------------------------------------------------ #
+    policies: List[Any] = []
+
+    if policy_name == "policy_random":
+        for _ in range(num_agents):
+            policies.append(
+                PolicyRandom(
+                    action_dim=action_dim,
+                    action_limits=action_limits,
+                )
+            )
+
+    elif policy_name == "policy_mppi":
+        pol_cfg = args.policies.policy_mppi
+        for i in range(num_agents):
+            pol = PolicyMPPI(
+                action_dim=action_dim,
+                action_limits=action_limits,
+                num_samples=int(pol_cfg.num_samples),
+                horizon=int(pol_cfg.horizon),
+                lambda_=float(pol_cfg.lambda_),
+                sampling_mode=str(pol_cfg.sampling_mode),
+                noise_std=float(pol_cfg.noise_std),
+                seed=seed + i,  # different seed per agent for diversity
+            )
+            pol.set_dynamics(dynamics)
+            # Each policy gets its *own* task's reward function
+            pol.set_reward_function(tasks[i].reward_for_active_subtask)
+            policies.append(pol)
+
+    else:
+        raise ValueError(
+            f"Unsupported policy '{policy_name}'. "
+            f"Expected one of: 'policy_random', 'policy_mppi'."
+        )
 
     agents = MultiAgent(
         num_agents=num_agents,
         state_dim=state_dim,
         action_dim=action_dim,
         history_len=history_len,
-        policies=policy,
+        policies=policies,
     )
 
     env = ProspectorEnvironment(
@@ -166,6 +235,7 @@ def main(args: DictConfig):
         log_dir=log_dir,
         cave_name=cave_name,
         agent_colors=agent_colors,
+        tasks=tasks,
     )
 
     print(
@@ -176,12 +246,29 @@ def main(args: DictConfig):
     # ------------------------------------------------------------------ #
     # Rollout (rendering is handled inside env.step)                     #
     # ------------------------------------------------------------------ #
-    num_steps = int(getattr(sim_cfg, "num_steps", 200))
+    num_steps = args.environment.max_episode_length
     print(f"[test_simulation] Running simulation for {num_steps} steps ...")
     pbar = tqdm(range(num_steps), desc="Simulation", unit="step")
 
     for _ in pbar:
         state, reward, done, info = env.step()  # env handles render_frame internally
+
+        if "current_subtask_idx" in info and isinstance(info["current_subtask_idx"], list):
+            if num_agents > 0:
+                pbar.set_postfix(
+                    {
+                        "wp0": int(info["current_subtask_idx"][0]),
+                        "r0": float(reward[0]),
+                    }
+                )
+
+        # Also end episode if all agents are done or have completed their tasks
+        if done.all():
+            print("[test_simulation] All agents done (dead); ending episode early.")
+            break
+        if env.all_tasks_completed():
+            print("[test_simulation] All agents completed their tasks; ending episode early.")
+            break
 
     # Export video of the simulation (env owns the orchestrator).
     video_path = env.finalize_video(output_name=f"{cave_name}_simulation")

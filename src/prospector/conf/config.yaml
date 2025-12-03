@@ -1,4 +1,4 @@
-seed: 42
+seed: 44
 
 # How to drive the main simulation?
 simulation:
@@ -8,7 +8,8 @@ simulation:
   cave: chamber
   agents:
     num_agents: 3
-    policy: policy_random
+    # policy to use: policy_random | policy_mppi
+    policy: policy_mppi
   render:
     # If true, produce an image for every step of the simulation
     # and render it in a window, then compile into a video at the end.
@@ -17,6 +18,8 @@ simulation:
     # Making this < 1 will speed up rendering at the cost of 
     # quality/layout niceness
     figure_size_multiplier: 1.0
+  # How many random waypoints to task each agent with reaching?
+  num_waypoints: 8
 
 # ----------------------------------------------------------------
 # Relating to the loading, processing, and plotting of the cave data
@@ -77,6 +80,31 @@ caves:
         alpha: 0.1
 
 # ----------------------------------------------------------------
+# Relating to rewards
+# ----------------------------------------------------------------
+rewards:
+
+  waypoint_following:
+    distance_weight: 1.0
+    control_effort_weight: 0.1
+    collision_penalty: 1e6
+    # If this is higher, then the agent can be within this number
+    # * their agent_radius of the goal to consider it reached
+    multiplier_within_radius_of_goal: 3.0
+
+# ----------------------------------------------------------------
+# Relating to policies
+# ----------------------------------------------------------------
+policies:
+
+  policy_mppi:
+    num_samples: 32
+    horizon: 10
+    lambda_: 1.0
+    noise_std: 0.05
+    sampling_mode: "uniform"  # uniform | gaussian
+
+# ----------------------------------------------------------------
 # Relating to agents
 # ----------------------------------------------------------------
 agents:
@@ -97,7 +125,7 @@ environment:
 dynamics:
 
   dynamics_2d_linear:
-    dt: 0.1
+    dt: 0.25
     # State is [x, y]
     state_dim: 2
     state_limits:
@@ -111,7 +139,7 @@ dynamics:
     position_dimensions: [0, 1]
 
   dynamics_3d_linear:
-    dt: 0.1
+    dt: 0.25
     # State is [x, y, z]
     state_dim: 3
     state_limits:
