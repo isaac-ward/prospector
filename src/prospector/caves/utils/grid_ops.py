@@ -332,7 +332,7 @@ def sample_free_indices_with_min_distance(
         raise ValueError(
             "Unable to sample the requested number of points with the given "
             f"min_distance={min_distance:.3f} (voxel_size={voxel_size:.3f}, "
-            f"num_free={num_free})."
+            f"num_free={num_free}). Try reducing agent_radius or min_distance."
         )
 
     return np.stack(selected, axis=0).astype(int)

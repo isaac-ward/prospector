@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from .base_policy import BasePolicy
 
 
-class RandomPolicy(BasePolicy):
+class PolicyRandom(BasePolicy):
     """
     Stateless uniform-random policy within given action limits.
 

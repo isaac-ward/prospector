@@ -14,7 +14,7 @@ from ...dynamics.base_dynamics import BaseDynamics
 RewardFn = Callable[[jnp.ndarray, jnp.ndarray], float | jnp.ndarray]
 
 
-class MPPIPolicy(BasePolicy):
+class PolicyMPPI(BasePolicy):
     """
     Simplified MPPI-like controller with *action sequences*.
 

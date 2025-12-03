@@ -13,9 +13,7 @@ import hydra
 from tqdm import tqdm
 import matplotlib as mpl
 
-
 from prospector.utils.custom_logging import make_log_dir, get_repo_root_dir
-from prospector.utils.plotting_orchestrator import PlottingOrchestrator
 from prospector.caves.utils.build_cavemap import build_cavemap
 
 from prospector.caves.cave_map_2d import CaveMap2D
@@ -24,7 +22,8 @@ from prospector.dynamics.dynamics_2d_linear import Dynamics2DLinear
 from prospector.dynamics.dynamics_3d_linear import Dynamics3DLinear
 from prospector.dynamics.dynamics_3d import Dynamics3D
 
-from prospector.agents.policies.policy_random import RandomPolicy
+from prospector.agents.initial_states import sample_initial_states
+from prospector.agents.policies.policy_random import PolicyRandom
 from prospector.agents.agent_multi import MultiAgent
 from prospector.agents.colors import get_agent_color_list
 from prospector.environment.environment import ProspectorEnvironment
@@ -67,7 +66,7 @@ def main(args: DictConfig):
     print(f"[test_simulation] Using seed: {seed}")
 
     # ------------------------------------------------------------------ #
-    # Agent parameters will be used shortly to get initialization        #
+    # Agent parameters                                                   #
     # ------------------------------------------------------------------ #
     num_agents = int(args.simulation.agents.num_agents)
     agent_colors = get_agent_color_list(num_agents)
@@ -125,26 +124,16 @@ def main(args: DictConfig):
     # ------------------------------------------------------------------ #
     # Sample initial position from free space                            #
     # ------------------------------------------------------------------ #
-    agent_radius = float(args.agents.agent_radius)
-    print(f"[test_simulation] Sampling initial position (agent_radius={agent_radius}) ...")
-
-    start_points = cave_map.sample_free_points(
-        num_points=num_agents,
-        min_distance=agent_radius * 4.0,
+    initial_state, start_points = sample_initial_states(
+        cave_map=cave_map,
+        num_agents=num_agents,
+        state_dim=state_dim,
+        position_dims=position_dims,
+        agent_radius=args.agents.agent_radius,
         rng=rng,
     )
+
     print(f"[test_simulation] Initial world position(s): {start_points}")
-
-    # ------------------------------------------------------------------ #
-    # Build initial state for dynamics                                   #
-    # ------------------------------------------------------------------ #
-
-    # The state isn't always just the position; we need to build the full state.
-    state_dim = args.dynamics[dynamics_name].state_dim
-    print(f"[test_simulation] Building initial state with state_dim={state_dim} ...")
-    initial_state = np.zeros((num_agents, state_dim), dtype=np.float32)  # (N, state_dim)
-    for i, pt in enumerate(start_points):
-        initial_state[i, position_dims] = pt
 
     # ------------------------------------------------------------------ #
     # Instantiate policy, agents, environment                            #
@@ -154,7 +143,7 @@ def main(args: DictConfig):
             f"Only 'policy_random' is supported currently, got '{policy_name}'."
         )
 
-    policy = RandomPolicy(
+    policy = PolicyRandom(
         action_dim=action_dim,
         action_limits=action_limits,
     )
@@ -173,6 +162,10 @@ def main(args: DictConfig):
         cave_map=cave_map,
         agents=agents,
         initial_state=initial_state,
+        render=args.simulation.render.enabled,
+        log_dir=log_dir,
+        cave_name=cave_name,
+        agent_colors=agent_colors,
     )
 
     print(
@@ -181,44 +174,17 @@ def main(args: DictConfig):
     )
 
     # ------------------------------------------------------------------ #
-    # Plotting orchestrator for simulation                               #
-    # ------------------------------------------------------------------ #
-    orch = PlottingOrchestrator(
-        mode="3d" if is_3d else "2d",
-        cave_map=cave_map,
-        cave_name=f"{cave_name}_sim",
-        log_dir=log_dir,
-        fps=24,
-        max_obstacle_points_3d=cave_cfg.plotting.obstacle_points.max_num,
-        alpha_obstacles_3d=cave_cfg.plotting.obstacle_points.alpha,
-    )
-
-    # ------------------------------------------------------------------ #
-    # Rollout + plotting                                                 #
+    # Rollout (rendering is handled inside env.step)                     #
     # ------------------------------------------------------------------ #
     num_steps = int(getattr(sim_cfg, "num_steps", 200))
     print(f"[test_simulation] Running simulation for {num_steps} steps ...")
     pbar = tqdm(range(num_steps), desc="Simulation", unit="step")
 
-    for t in pbar:
-        state, reward, done, info = env.step()  # state shape: (num_agents, state_dim)
+    for _ in pbar:
+        state, reward, done, info = env.step()  # env handles render_frame internally
 
-        # Agent info for plotting
-        agent_positions = np.array(
-            [state[i, position_dims].tolist() for i in range(num_agents)]
-        )  # (N, 2) or (N, 3)
-        alive_mask = np.array(info["alive_mask"])  # (N,)
-
-        frame_path = orch.render_frame(
-            frame_idx=t,
-            agent_positions=agent_positions,     # (N, 2) or (N, 3)
-            agent_colors=agent_colors,           # (N,)
-            agent_alives=alive_mask,             # (N,)
-            agent_communications_matrix=info["communications_matrix"],  # (N, N)
-        )
-
-    # Export video of the simulation
-    video_path = orch.finalize_video(output_name=f"{cave_name}_simulation")
+    # Export video of the simulation (env owns the orchestrator).
+    video_path = env.finalize_video(output_name=f"{cave_name}_simulation")
     print(f"[test_simulation] Simulation video saved to: {video_path}")
 
     print("[test_simulation] Test complete.")

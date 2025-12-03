@@ -52,6 +52,7 @@ class PlottingOrchestrator:
         max_obstacle_points_3d: Optional[int] = None,
         alpha_obstacles_3d: float = 0.1,
         dpi: int = 150,
+        figure_size_multiplier: float = 1.0,
     ) -> None:
         self.mode = mode
         self.cave_name = cave_name
@@ -81,7 +82,7 @@ class PlottingOrchestrator:
             self.plotter_2d = CaveMap2DPlotter(self.cave_map_2d)
 
             # Create 2D figure + axes once
-            self.fig, self.ax2d = plt.subplots(figsize=(6, 6))
+            self.fig, self.ax2d = plt.subplots(figsize=(6 * figure_size_multiplier, 6 * figure_size_multiplier))
             self.fig.suptitle(f"{cave_name} – 2D occupancy")
             self.fig.tight_layout()
 
@@ -104,7 +105,7 @@ class PlottingOrchestrator:
             self.alpha_obstacles_3d = float(alpha_obstacles_3d)
 
             # Create 3D figure + GridSpec + axes once
-            self.fig = plt.figure(figsize=(10, 12))
+            self.fig = plt.figure(figsize=(10 * figure_size_multiplier, 12 * figure_size_multiplier))
             gs = GridSpec(4, 3, figure=self.fig)
 
             # Top 3 rows: 3D

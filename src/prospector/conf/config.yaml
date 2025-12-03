@@ -2,12 +2,21 @@ seed: 42
 
 # How to drive the main simulation?
 simulation:
-  # dynamics_2d_linear | dynamics_3d_linear | dynamics_3d
-  dynamics_model: dynamics_3d
-  cave: chamber
+  # dynamics model to use: dynamics_2d_linear | dynamics_3d_linear | dynamics_3d
+  dynamics_model: dynamics_3d_linear
+  # cave to explore: chamber | tunnels | grapevine
+  cave: tunnels
   agents:
     num_agents: 3
     policy: policy_random
+  render:
+    # If true, produce an image for every step of the simulation
+    # and render it in a window, then compile into a video at the end.
+    # This slows down the simulation.
+    enabled: true
+    # Making this < 1 will speed up rendering at the cost of 
+    # quality/layout niceness
+    figure_size_multiplier: 1.0
 
 # ----------------------------------------------------------------
 # Relating to the loading, processing, and plotting of the cave data

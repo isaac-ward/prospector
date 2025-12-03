@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Tuple, Optional, Sequence
 
 import jax.numpy as jnp
 import numpy as np
@@ -11,6 +12,7 @@ from ..dynamics.base_dynamics import BaseDynamics
 from ..agents.agent_multi import MultiAgent
 from ..caves.cave_map_2d import CaveMap2D
 from ..caves.cave_map_3d import CaveMap3D
+from ..utils.plotting_orchestrator import PlottingOrchestrator
 
 
 AliveFn = Callable[[jnp.ndarray], bool]
@@ -27,16 +29,8 @@ class ProspectorEnvironment:
     - Advance the state using the provided `BaseDynamics` instance.
     - Track a simple step counter and per-agent "alive" / "done" flags.
     - Return reward (currently zeros) and a debug/info dict.
-
-    Design choices
-    --------------
-    - We *do not* assume the dynamics are batchable; instead, we treat
-      `num_agents` as independent copies of the same dynamics and step
-      them in a Python loop.
-    - For num_agents == 1, we still use the same interface, with the
-      state stored as shape (1, state_dim) internally.
-    - Collision / termination is injected via an optional `alive_fn`
-      that maps a state vector to a boolean "still alive" flag.
+    - Optionally manage rendering via an internal PlottingOrchestrator when
+      `render=True`.
     """
 
     def __init__(
@@ -45,7 +39,12 @@ class ProspectorEnvironment:
         cave_map: CaveMap2D | CaveMap3D,
         agents: MultiAgent,
         initial_state: jnp.ndarray,
-        config: Dict[str, Any],
+        config: Any,
+        *,
+        render: bool = False,
+        log_dir: Optional[str | Path] = None,
+        cave_name: Optional[str] = None,
+        agent_colors: Optional[np.ndarray] = None,
     ) -> None:
         """
         Parameters
@@ -58,18 +57,30 @@ class ProspectorEnvironment:
             Controller(s) that produce actions from histories.
         initial_state : (num_agents, state_dim) or (state_dim,)
             Initial state for each agent's copy of the system.
-        config       : Dict[str, Any]
-            Full configuration dictionary for reference.
+        config        : Dict-like / DictConfig
+            Full configuration for reference (Hydra DictConfig is fine).
+        render        : bool, optional
+            If True, this environment will construct and own a
+            PlottingOrchestrator and call `render_frame` on each step.
+        log_dir       : str or Path, optional
+            Logging directory for rendered frames (required if render=True).
+        cave_name     : str, optional
+            Name of the cave / scenario (used for naming and config lookup;
+            required if render=True).
+        agent_colors  : (num_agents,) array-like, optional
+            Per-agent colors for plotting (required if render=True).
         """
         self._dynamics = dynamics
         self._cave_map = cave_map
         self._agents = agents
-        self.config = config 
+        self.config = config
 
         self._max_episode_steps = self.config.environment.max_episode_length
 
-        # What are the state elements that define the cartesian position? 
-        self.position_dims = tuple(self.config.dynamics[self.config.simulation.dynamics_model].position_dimensions)
+        # What are the state elements that define the cartesian position?
+        self.position_dims = tuple(
+            self.config.dynamics[self.config.simulation.dynamics_model].position_dimensions
+        )
 
         self._state = self._normalize_state_shape(initial_state)
         self._step_index: int = 0
@@ -79,6 +90,42 @@ class ProspectorEnvironment:
 
         # Initialize agent histories with the initial state.
         self._agents.reset(self._state)
+
+        # ------------------------------------------------------------------ #
+        # Optional rendering setup                                           #
+        # ------------------------------------------------------------------ #
+        self._render = bool(render)
+        self._orch: Optional[PlottingOrchestrator] = None
+        self._agent_colors: Optional[np.ndarray] = None
+        self._cave_name: Optional[str] = cave_name
+
+        if self._render:
+            if log_dir is None:
+                raise ValueError("log_dir must be provided when render=True.")
+            if cave_name is None:
+                raise ValueError("cave_name must be provided when render=True.")
+            if agent_colors is None:
+                raise ValueError("agent_colors must be provided when render=True.")
+
+            log_dir = Path(log_dir)
+            self._agent_colors = np.asarray(agent_colors)
+
+            # Determine 2D vs 3D from the cave map or position dims.
+            is_3d = isinstance(cave_map, CaveMap3D) or (len(self.position_dims) == 3)
+            mode = "3d" if is_3d else "2d"
+
+            cave_cfg = self.config.caves[cave_name]
+
+            self._orch = PlottingOrchestrator(
+                mode=mode,
+                cave_map=cave_map,
+                cave_name=f"{cave_name}_sim",
+                log_dir=log_dir,
+                fps=24,
+                max_obstacle_points_3d=cave_cfg.plotting.obstacle_points.max_num,
+                alpha_obstacles_3d=cave_cfg.plotting.obstacle_points.alpha,
+                figure_size_multiplier=config.simulation.render.figure_size_multiplier,
+            )
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                   #
@@ -129,32 +176,12 @@ class ProspectorEnvironment:
         """
         Advance the environment by one time step.
 
-        Procedure
-        ---------
-        - Query the agent(s) for actions using their internal histories.
-        - For each agent:
-            * If already dead, keep its state fixed, ignore its action,
-              and mark done=True.
-            * Else, apply dynamics.step(current_state_i, action_i).
-              If `alive_fn` is provided and returns False on the new state,
-              mark that agent as dead and done=True.
-        - Update the agents' histories with (actions, next_state).
-        - Optionally terminate all agents if `max_episode_steps` is reached.
-
         Returns
         -------
         next_state : (num_agents, state_dim) jnp.ndarray
         reward     : (num_agents,) jnp.ndarray
-            Currently all zeros; ready to be extended.
         done       : (num_agents,) jnp.ndarray of bool
-            True where the agent is dead or episode terminated.
         info       : dict
-            Contains at least:
-                - "actions": actions taken this step
-                - "dynamics_debug": list of per-agent debug dicts
-                - "step_index": current step index (after increment)
-                - "alive_mask": current alive mask after this step
-                - "max_episode_terminated": bool
         """
         num_agents = self._agents.num_agents
 
@@ -174,7 +201,7 @@ class ProspectorEnvironment:
             if not bool(self._alive[i]):
                 # Dead agents: freeze state, ignore action.
                 next_states_list.append(jnp.asarray(state_i))
-                debug_list.append({"status": np.asarray("dead")})  # lightweight tag
+                debug_list.append({"status": np.asarray("dead")})
                 new_alive_list.append(False)
                 done_list.append(True)
                 continue
@@ -185,9 +212,8 @@ class ProspectorEnvironment:
             next_states_list.append(ns_i)
             debug_list.append(dbg_i)
 
-            # Evaluate alive_fn on the *next* state if provided.
+            # Check for collisions with cave map.
             still_alive = True
-            # Check for collisions with cave map
             if self._cave_map.is_collision_within_radius(
                 [ns_i[dim] for dim in self.position_dims],
                 self.config.agents.agent_radius,
@@ -202,8 +228,7 @@ class ProspectorEnvironment:
         # Update internal alive mask.
         self._alive = jnp.asarray(new_alive_list, dtype=bool)
 
-        # 3) Update histories on the agent side (even for dead agents, their
-        #    states/actions get tracked so that logs are consistent).
+        # 3) Update histories on the agent side.
         self._agents.update_history(next_state, actions)
 
         # 4) Update environment state and step index.
@@ -216,21 +241,14 @@ class ProspectorEnvironment:
             if self._step_index >= self._max_episode_steps:
                 max_episode_terminated = True
                 done_list = [True] * num_agents
-                # Keep alive mask as-is (they may still be "alive" physically,
-                # but the episode is over).
 
         done = jnp.asarray(done_list, dtype=bool)
 
-        # 6) Compute reward (currently zero for all agents).
+        # 6) Reward (currently zero for all agents).
         reward = jnp.zeros((num_agents,), dtype=jnp.float32)
 
-        # 7) Compute a communications matrix. This is a line of sight matrix
-        # for all pairs of agents (num_agents, num_agents), with 1 meaning
-        # they can see each other, and 0 meaning they cannot (get this information)
-        # from the cavemap
+        # 7) Communications matrix (line of sight).
         comms_matrix = np.zeros((num_agents, num_agents), dtype=np.int8)
-        # It will be symmetric, so only compute half the matrix
-        # then mirror it
         for i in range(num_agents):
             for j in range(i + 1, num_agents):
                 if not (self._alive[i] and self._alive[j]):
@@ -240,7 +258,7 @@ class ProspectorEnvironment:
                 if self._cave_map.has_line_of_sight(pos_i, pos_j):
                     comms_matrix[i, j] = 1
                     comms_matrix[j, i] = 1
-        # Mirror it
+        # Mirror it (note: this will double the 1s to 2s as written).
         comms_matrix += comms_matrix.T
 
         info: Dict[str, Any] = {
@@ -252,7 +270,52 @@ class ProspectorEnvironment:
             "communications_matrix": comms_matrix,
         }
 
+        # 8) Optional rendering
+        if self._render and self._orch is not None and self._agent_colors is not None:
+            agent_positions = np.asarray(
+                [self._state[i, self.position_dims].tolist() for i in range(num_agents)]
+            )
+            alive_mask = np.asarray(self._alive)
+
+            # frame_idx should match the external "t" used previously (0-based).
+            frame_idx = self._step_index - 1
+
+            self._orch.render_frame(
+                frame_idx=frame_idx,
+                agent_positions=agent_positions,
+                agent_colors=self._agent_colors,
+                agent_alives=alive_mask,
+                agent_communications_matrix=comms_matrix,
+            )
+
         return self._state, reward, done, info
+
+    def finalize_video(self, output_name: Optional[str] = None) -> Optional[Path]:
+        """
+        If rendering is enabled, finalize and export the simulation video.
+
+        Parameters
+        ----------
+        output_name : str, optional
+            Name for the output video (without extension). If None, a default
+            based on the cave name is used.
+
+        Returns
+        -------
+        video_path : Path or None
+        """
+        if not self._render or self._orch is None:
+            return None
+
+        if output_name is None:
+            # Fall back to config-based cave name if we didn't get one in ctor.
+            cave_name = (
+                self._cave_name if self._cave_name is not None else self.config.simulation.cave
+            )
+            output_name = f"{cave_name}_simulation"
+
+        video_path = self._orch.finalize_video(output_name=output_name)
+        return Path(video_path)
 
     # Convenience properties
     # ------------------------------------------------------------------ #
@@ -262,9 +325,7 @@ class ProspectorEnvironment:
 
     @property
     def state(self) -> jnp.ndarray:
-        """
-        Current state, always shape (num_agents, state_dim) internally.
-        """
+        """Current state, always shape (num_agents, state_dim) internally."""
         return self._state
 
     @property
@@ -281,7 +342,5 @@ class ProspectorEnvironment:
 
     @property
     def alive_mask(self) -> jnp.ndarray:
-        """
-        Per-agent alive mask, updated each step.
-        """
+        """Per-agent alive mask, updated each step."""
         return self._alive
