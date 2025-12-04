@@ -55,7 +55,9 @@ def main(args: DictConfig):
             cave_name=cave_name,
             log_dir=log_dir,
         )
-        frame2d_path = orch_2d.render_frame(frame_idx=0)
+        frame2d_path = orch_2d.render_frame(
+            frame_idx=0
+        )
         print(f"  - Saved 2D frame for {cave_name} to: {frame2d_path}")
         print(f"  - Also saved 2D occupancy image to: {orch_2d.single_image_path}")
 
@@ -96,7 +98,10 @@ def main(args: DictConfig):
         for frame_idx, agent_pos in enumerate(
             tqdm(agent_positions, desc=f"Rendering {cave_name} animation", unit="frame")
         ):
-            orch_3d.render_frame(frame_idx=frame_idx, agent_pos_world=agent_pos)
+            orch_3d.render_frame(
+                frame_idx=frame_idx, 
+                agent_pos_world=agent_pos
+            )
 
         video_path = orch_3d.finalize_video(output_name=f"{cave_name}_3d")
         print(f"  - Saved 3D animation video for {cave_name} to: {video_path}")

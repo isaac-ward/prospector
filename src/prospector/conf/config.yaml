@@ -5,7 +5,7 @@ simulation:
   # dynamics model to use: dynamics_2d_linear | dynamics_3d_linear | dynamics_3d
   dynamics_model: dynamics_3d_linear
   # cave to explore: chamber | tunnels | grapevine
-  cave: chamber
+  cave: grapevine
   agents:
     num_agents: 3
     # policy to use: policy_random | policy_mppi
@@ -20,6 +20,8 @@ simulation:
     figure_size_multiplier: 1.0
   # How many random waypoints to task each agent with reaching?
   num_waypoints: 8
+  # After reaching all waypoints, how many steps to continue simulating
+  num_steps_to_simulate_after_completion: 50
 
 # ----------------------------------------------------------------
 # Relating to the loading, processing, and plotting of the cave data
@@ -69,11 +71,11 @@ caves:
           - Michelle Ho
           - Maximilian Adang
     relative_path: "/src/assets/grapevine.ply"
-    known_internal_xyz: [11.5246, 23.8243, -1.52496]
+    known_internal_xyz: [-0.672833, 0.089741, 1.85611]
     slice_for_2d:
-      z: null
-      thickness: 0.1
-    voxel_size: 0.05
+      z: 1.94226
+      thickness: 0.01
+    voxel_size: 0.2
     plotting:
       obstacle_points:
         max_num: 20000

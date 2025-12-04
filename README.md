@@ -25,11 +25,12 @@ To run the project use:
 uv run python src/prospector/main.py
 uv run --env-file .env -- python -m prospector.tests.test_caves_matplotlib
 uv run --env-file .env -- python -m prospector.tests.test_simulation
+uv run --env-file .env -- python -m prospector.tests.test_cave_graphs
 
 # For example, how to test with different parameters:
 uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=chamber
-uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=tu
-nnels
+uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=tunnels
+uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=tunnels simulation.dynamics_model=dynamics_2d_linear
 ```
 
 # Citation
@@ -39,7 +40,7 @@ If you use this code in your research, please cite:
 ```bibtex
 @misc{your_citation_key,
   author = {Isaac Ronald Ward, Mark Paral, Kristopher Riordan, Maximilian Adang, Michelle Ho},
-  title = {Prospector: a Cave Simulation Environment for Training Field Robots},
+  title = {Prospector: a Cave Simulation Environment for Rotorcraft},
   year = {2025},
   publisher = {Stanford University},
   howpublished = {\url{https://github.com/isaac-ward/prospector}},

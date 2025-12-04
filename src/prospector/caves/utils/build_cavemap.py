@@ -111,7 +111,7 @@ def build_cavemap(
             slice_for_2d_z=slice_z,
             slice_for_2d_thickness=slice_thickness,
         )
-        cave_map_2d.label_accessible_space(known_internal_xyz)
+        cave_map_2d.label_accessible_space(known_internal_xyz[:2])  # only need XY for 2D
         cacher_2d.save({"cave_map_2d": cave_map_2d})
 
     return cave_map_2d, ply_path

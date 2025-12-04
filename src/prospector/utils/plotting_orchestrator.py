@@ -8,6 +8,7 @@ from typing import Literal, Optional, Union
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+import matplotlib.patheffects as path_effects
 
 from prospector.caves.cave_map_2d import CaveMap2D
 from prospector.caves.cave_map_3d import CaveMap3D
@@ -457,6 +458,9 @@ class PlottingOrchestrator:
             clear=False,
         )
 
+        # This controls how much larger or smaller to make the markers
+        marker_size_multiplier = 3
+
         # Alive agents: circles with black outline (3D + projections)
         if np.any(alive_mask):
             xs_alive = xs[alive_mask]
@@ -470,7 +474,7 @@ class PlottingOrchestrator:
                 ys_alive,
                 zs_alive,
                 c=colors_alive,
-                s=40,
+                s=40 * marker_size_multiplier,
                 marker="o",
                 edgecolors="k",
                 linewidths=1,
@@ -481,7 +485,7 @@ class PlottingOrchestrator:
                 xs_alive,
                 ys_alive,
                 c=colors_alive,
-                s=25,
+                s=40 * marker_size_multiplier,
                 marker="o",
                 edgecolors="k",
                 linewidths=1,
@@ -490,7 +494,7 @@ class PlottingOrchestrator:
                 xs_alive,
                 zs_alive,
                 c=colors_alive,
-                s=25,
+                s=40 * marker_size_multiplier,
                 marker="o",
                 edgecolors="k",
                 linewidths=1,
@@ -499,7 +503,7 @@ class PlottingOrchestrator:
                 ys_alive,
                 zs_alive,
                 c=colors_alive,
-                s=25,
+                s=40 * marker_size_multiplier,
                 marker="o",
                 edgecolors="k",
                 linewidths=1,
@@ -518,9 +522,8 @@ class PlottingOrchestrator:
                 ys_dead,
                 zs_dead,
                 c="black",
-                s=70,
+                s=70 * marker_size_multiplier,
                 marker="x",
-                depthshade=False,
                 linewidths=3.0,
             )
             ax3d.scatter(
@@ -528,9 +531,8 @@ class PlottingOrchestrator:
                 ys_dead,
                 zs_dead,
                 c=colors_dead,
-                s=70,
+                s=70 * marker_size_multiplier,
                 marker="x",
-                depthshade=False,
                 linewidths=2.0,
             )
 
@@ -539,7 +541,7 @@ class PlottingOrchestrator:
                 xs_dead,
                 ys_dead,
                 c="black",
-                s=50,
+                s=70 * marker_size_multiplier,
                 marker="x",
                 linewidths=3.0,
             )
@@ -547,7 +549,7 @@ class PlottingOrchestrator:
                 xs_dead,
                 ys_dead,
                 c=colors_dead,
-                s=50,
+                s=70 * marker_size_multiplier,
                 marker="x",
                 linewidths=2.0,
             )
@@ -557,7 +559,7 @@ class PlottingOrchestrator:
                 xs_dead,
                 zs_dead,
                 c="black",
-                s=50,
+                s=70 * marker_size_multiplier,
                 marker="x",
                 linewidths=3.0,
             )
@@ -565,7 +567,7 @@ class PlottingOrchestrator:
                 xs_dead,
                 zs_dead,
                 c=colors_dead,
-                s=50,
+                s=70 * marker_size_multiplier,
                 marker="x",
                 linewidths=2.0,
             )
@@ -575,7 +577,7 @@ class PlottingOrchestrator:
                 ys_dead,
                 zs_dead,
                 c="black",
-                s=50,
+                s=70 * marker_size_multiplier,
                 marker="x",
                 linewidths=3.0,
             )
@@ -583,9 +585,96 @@ class PlottingOrchestrator:
                 ys_dead,
                 zs_dead,
                 c=colors_dead,
-                s=50,
+                s=70 * marker_size_multiplier,
                 marker="x",
                 linewidths=2.0,
+            )
+
+        # Regardless of alive or dead, put the agent's index
+        # as a small number as a lower indices, with the agent's fill
+        # color and a black outline.
+        for agent_idx, pos in enumerate(positions3d):
+            x, y, z = pos
+            c = colors[agent_idx]
+
+            # z order so it's always above the agent marker
+            zorder = 5
+
+            # Text should be offset so it looks like an indedx
+            text = f"{agent_idx}"
+
+            # font size to fit in circle
+            fontsize = 8
+
+            # vertically alignment
+            va = "center"
+
+            # horizontally alignment
+            ha = "center"
+
+            # 3D text
+            ax3d.text(
+                x,
+                y,
+                z,
+                text,
+                va=va,
+                ha=ha,
+                color=c,
+                fontsize=fontsize,
+                weight="bold",
+                path_effects=[
+                    path_effects.withStroke(linewidth=1.5, foreground="k")
+                ],
+                zorder=zorder,
+            )
+
+            # XY projection
+            ax_xy.text(
+                x,
+                y,
+                text,
+                va=va,
+                ha=ha,
+                color=c,
+                fontsize=fontsize,
+                weight="bold",
+                path_effects=[
+                    path_effects.withStroke(linewidth=1.5, foreground="k")
+                ],
+                zorder=zorder,
+            )
+
+            # XZ projection
+            ax_xz.text(
+                x,
+                z,
+                text,
+                va=va,
+                ha=ha,
+                color=c,
+                fontsize=fontsize,
+                weight="bold",
+                path_effects=[
+                    path_effects.withStroke(linewidth=1.5, foreground="k")
+                ],
+                zorder=zorder,
+            )
+
+            # YZ projection
+            ax_yz.text(
+                y,
+                z,
+                text,
+                va=va,
+                ha=ha,
+                color=c,
+                fontsize=fontsize,
+                weight="bold",
+                path_effects=[
+                    path_effects.withStroke(linewidth=1.5, foreground="k")
+                ],
+                zorder=zorder,
             )
 
         # Waypoints in 3D: big hollow circles ("O") in agent color
@@ -600,7 +689,7 @@ class PlottingOrchestrator:
                 wx_valid,
                 wy_valid,
                 wz_valid,
-                s=110,
+                s=150,
                 facecolors="none",
                 edgecolors=colors_valid,
                 linewidths=1.5,
@@ -608,11 +697,15 @@ class PlottingOrchestrator:
                 depthshade=False,
             )
 
+            # A tiny little number to their top right, indicating 
+            # which agent, and what waypoint # it is for that agent.
+            # TODO
+
             # Projections
             ax_xy.scatter(
                 wx_valid,
                 wy_valid,
-                s=80,
+                s=120,
                 facecolors="none",
                 edgecolors=colors_valid,
                 linewidths=1.5,
@@ -621,7 +714,7 @@ class PlottingOrchestrator:
             ax_xz.scatter(
                 wx_valid,
                 wz_valid,
-                s=80,
+                s=120,
                 facecolors="none",
                 edgecolors=colors_valid,
                 linewidths=1.5,
@@ -630,7 +723,7 @@ class PlottingOrchestrator:
             ax_yz.scatter(
                 wy_valid,
                 wz_valid,
-                s=80,
+                s=120,
                 facecolors="none",
                 edgecolors=colors_valid,
                 linewidths=1.5,

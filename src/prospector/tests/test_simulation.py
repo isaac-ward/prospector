@@ -164,7 +164,7 @@ def main(args: DictConfig):
 
         task = TaskWaypointFollowing(
             waypoints=waypoint_points_task,
-            dynamics=dynamics,
+            position_dims=position_dims,
             cave_map=cave_map,
             agent_radius=agent_radius,
             distance_weight=distance_weight,
@@ -250,6 +250,7 @@ def main(args: DictConfig):
     print(f"[test_simulation] Running simulation for {num_steps} steps ...")
     pbar = tqdm(range(num_steps), desc="Simulation", unit="step")
 
+    num_steps_to_simulate_after_completion = int(args.simulation.num_steps_to_simulate_after_completion)
     for _ in pbar:
         state, reward, done, info = env.step()  # env handles render_frame internally
 
@@ -267,8 +268,10 @@ def main(args: DictConfig):
             print("[test_simulation] All agents done (dead); ending episode early.")
             break
         if env.all_tasks_completed():
-            print("[test_simulation] All agents completed their tasks; ending episode early.")
-            break
+            print(f"[test_simulation] All agents completed their tasks; ending episode in {num_steps_to_simulate_after_completion} steps.")
+            num_steps_to_simulate_after_completion -= 1
+            if num_steps_to_simulate_after_completion <= 0:
+                break
 
     # Export video of the simulation (env owns the orchestrator).
     video_path = env.finalize_video(output_name=f"{cave_name}_simulation")
