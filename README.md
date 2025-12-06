@@ -2,7 +2,7 @@
 
 # Prerequisites
 
-- Install uv from https://uv.readthedocs.io/en/latest/installation.html
+- Install uv from https://docs.astral.sh/uv/getting-started/installation/
 - Install Git LFS from https://git-lfs.com/
 
 # Running this
@@ -23,9 +23,10 @@ To run the project use:
 
 ```bash
 uv run python src/prospector/main.py
-uv run --env-file .env -- python -m prospector.tests.test_caves_matplotlib
+uv run --env-file .env -- python -m prospector.tests.test_cave_visuals
+uv run --env-file .env -- python -m prospector.tests.test_cave_graphs_automatic
+uv run --env-file .env -- python -m prospector.tests.test_cave_graphs_manual
 uv run --env-file .env -- python -m prospector.tests.test_simulation
-uv run --env-file .env -- python -m prospector.tests.test_cave_graphs
 
 # For example, how to test with different parameters:
 uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=chamber
@@ -38,7 +39,7 @@ uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.
 If you use this code in your research, please cite:
 
 ```bibtex
-@misc{your_citation_key,
+@misc{ward2025prospector,
   author = {Isaac Ronald Ward, Mark Paral, Kristopher Riordan, Maximilian Adang, Michelle Ho},
   title = {Prospector: a Cave Simulation Environment for Rotorcraft},
   year = {2025},

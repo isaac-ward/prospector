@@ -25,8 +25,8 @@ def main(args: DictConfig):
     # ------------------------------------------------------------------ #
     # Setup logging directory                                            #
     # ------------------------------------------------------------------ #
-    log_dir = make_log_dir(prefix="test_cave_graphs")
-    print(f"[test_cave_graphs] Logging to: {log_dir}")
+    log_dir = make_log_dir(prefix="test_cave_graphs_automatic")
+    print(f"[test_cave_graphs_automatic] Logging to: {log_dir}")
 
     repo_root = Path(get_repo_root_dir())
     log_dir = Path(log_dir)
@@ -40,7 +40,7 @@ def main(args: DictConfig):
     # Iterate through each cave and compute the graph representation     #
     # ------------------------------------------------------------------ #
     for cave_name in cave_names:
-        print(f"\n[test_cave_graphs] Building maps for cave='{cave_name}' ...")
+        print(f"\n[test_cave_graphs_automatic] Building maps for cave='{cave_name}' ...")
 
         # build_cavemap is expected to return (CaveMap2D, CaveMap3D)
         cave2d, _ = build_cavemap(cave_cfg=args.caves[cave_name], cave_name=cave_name, repo_root=repo_root, use_3d=False)
@@ -57,13 +57,13 @@ def main(args: DictConfig):
         export_3d = cave_log_root / "3d_graphs"
         export_3d.mkdir(parents=True, exist_ok=True)
 
-        print(f"[test_cave_graphs]   2D and 3D export dirs:")
+        print(f"[test_cave_graphs_automatic]   2D and 3D export dirs:")
         print(f"    2D: {export_2d}")
         print(f"    3D: {export_3d}")
 
         for n in tqdm(num_nodes_list, desc=f"{cave_name}: graphs", unit="graph"):
             # 2D graph
-            print(f"[test_cave_graphs]   Cave='{cave_name}' 2D, N={n}")
+            print(f"[test_cave_graphs_automatic]   Cave='{cave_name}' 2D, N={n}")
             build_and_export_cave_graph(
                 cave_map=cave2d,
                 num_nodes=n,
@@ -73,7 +73,7 @@ def main(args: DictConfig):
             )
 
             # 3D graph
-            print(f"[test_cave_graphs]   Cave='{cave_name}' 3D, N={n}")
+            print(f"[test_cave_graphs_automatic]   Cave='{cave_name}' 3D, N={n}")
             build_and_export_cave_graph(
                 cave_map=cave3d,
                 num_nodes=n,
@@ -82,7 +82,7 @@ def main(args: DictConfig):
                 rng=rng,
             )
 
-    print("\n[test_cave_graphs] Done.")
+    print("\n[test_cave_graphs_automatic] Done.")
 
 
 if __name__ == "__main__":

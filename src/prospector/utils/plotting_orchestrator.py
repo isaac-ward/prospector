@@ -27,8 +27,8 @@ class PlottingOrchestrator:
     Responsibilities
     ----------------
     - Create and own a matplotlib Figure + Axes layout at construction time.
-    - On every call to `render_frame(...)`, draw the cave and agent
-      information into the existing axes and save a PNG frame.
+    - On every call to `render_frame(...)`, draw the cave and optional agent
+      and graph information into the existing axes and save a PNG frame.
     - Optionally convert accumulated frames into an MP4 via `finalize_video`.
 
     Modes
@@ -39,7 +39,9 @@ class PlottingOrchestrator:
     mode == "3d":
         - Figure with a 4x3 GridSpec:
             * Top 3 rows (all 3 columns): 3D occupancy.
-            * Bottom row: XY, XZ, YZ slices through a given point.
+            * Bottom row: XY, XZ, YZ slices through a point:
+                - If agents given: slice through the first agent's position.
+                - If no agents: slice through the center of the cave extents.
     """
 
     def __init__(
@@ -92,9 +94,6 @@ class PlottingOrchestrator:
             self.fig.suptitle(f"{cave_name} – 2D occupancy")
             self.fig.tight_layout()
 
-            # Convenience path for a single static PNG if you ever want it
-            self.single_image_path = self.log_dir / f"{cave_name}_2d.png"
-
         elif mode == "3d":
             if not isinstance(cave_map, CaveMap3D):
                 raise TypeError(
@@ -104,6 +103,7 @@ class PlottingOrchestrator:
             self.cave_map_3d: CaveMap3D = cave_map
             self.cave_map_2d: Optional[CaveMap2D] = None
 
+            print(f"[PlottingOrchestrator]   max_obstacle_points_3d: {max_obstacle_points_3d}")
             self.plotter_3d = CaveMap3DPlotter(
                 self.cave_map_3d,
                 max_obstacle_points=max_obstacle_points_3d,
@@ -219,160 +219,527 @@ class PlottingOrchestrator:
             )
 
     # ------------------------------------------------------------------ #
+    # Graph plotting helpers                                             #
+    # ------------------------------------------------------------------ #
+    def _plot_graph_nodes_2d(
+        self,
+        ax,
+        graph_nodes: np.ndarray,
+    ) -> None:
+        """
+        Plot graph nodes + index labels in 2D (orange).
+        Node index is implied by position in the list.
+        """
+        nodes = np.asarray(graph_nodes, dtype=float)
+        if nodes.ndim != 2 or nodes.shape[1] not in (2, 3):
+            raise ValueError(
+                "graph_nodes must have shape (num_nodes, 2) or (num_nodes, 3); "
+                f"got {nodes.shape}"
+            )
+
+        xs = nodes[:, 0]
+        ys = nodes[:, 1]
+
+        # Plot nodes as orange circles with black outline
+        ax.scatter(
+            xs,
+            ys,
+            c="orange",
+            s=40,
+            marker="o",
+            edgecolors="k",
+            linewidths=1.0,
+            zorder=5,
+        )
+
+        # Index labels
+        pe = [path_effects.withStroke(linewidth=1.5, foreground="k")]
+        for idx, (x, y) in enumerate(zip(xs, ys)):
+            ax.text(
+                x,
+                y,
+                str(idx),
+                va="center",
+                ha="center",
+                color="orange",
+                fontsize=8,
+                weight="bold",
+                path_effects=pe,
+                zorder=6,
+            )
+
+    def _plot_graph_edges_2d(
+        self,
+        ax,
+        graph_nodes: np.ndarray,
+        graph_edges: np.ndarray,
+    ) -> None:
+        """
+        Plot graph edges as orange lines in 2D.
+        """
+        nodes = np.asarray(graph_nodes, dtype=float)
+        edges = np.asarray(graph_edges, dtype=int)
+
+        if nodes.ndim != 2 or nodes.shape[1] not in (2, 3):
+            raise ValueError(
+                "graph_nodes must have shape (num_nodes, 2) or (num_nodes, 3); "
+                f"got {nodes.shape}"
+            )
+        if edges.ndim != 2 or edges.shape[1] != 2:
+            raise ValueError(
+                "graph_edges must have shape (num_edges, 2); "
+                f"got {edges.shape}"
+            )
+
+        xs = nodes[:, 0]
+        ys = nodes[:, 1]
+        num_nodes = nodes.shape[0]
+
+        for i, j in edges:
+            if not (0 <= i < num_nodes and 0 <= j < num_nodes):
+                continue
+            x0, y0 = xs[i], ys[i]
+            x1, y1 = xs[j], ys[j]
+            ax.plot(
+                [x0, x1],
+                [y0, y1],
+                color="orange",
+                linewidth=1.5,
+                zorder=4,
+            )
+
+    def _plot_graph_nodes_3d(
+        self,
+        ax3d,
+        ax_xy,
+        ax_xz,
+        ax_yz,
+        graph_nodes: np.ndarray,
+    ) -> None:
+        """
+        Plot graph nodes + index labels in 3D + projections (orange).
+        Node index is implied by position in the list.
+        """
+        nodes = np.asarray(graph_nodes, dtype=float)
+        if nodes.ndim != 2 or nodes.shape[1] not in (2, 3):
+            raise ValueError(
+                "graph_nodes must have shape (num_nodes, 2) or (num_nodes, 3); "
+                f"got {nodes.shape}"
+            )
+
+        if nodes.shape[1] == 3:
+            nodes3d = nodes
+        else:
+            # Lift 2D into 3D using grid_min[2]
+            z_default = float(self.cave_map.grid_min[2])
+            nodes3d = np.column_stack(
+                [nodes[:, 0], nodes[:, 1], np.full(nodes.shape[0], z_default)]
+            )
+
+        xs = nodes3d[:, 0]
+        ys = nodes3d[:, 1]
+        zs = nodes3d[:, 2]
+
+        # Plot nodes as orange circles with black outline
+        s = 40 * 3  # reuse marker_size_multiplier ~ 3
+        ax3d.scatter(
+            xs,
+            ys,
+            zs,
+            c="orange",
+            s=s,
+            marker="o",
+            edgecolors="k",
+            linewidths=1.0,
+            depthshade=False,
+            zorder=5,
+        )
+        ax_xy.scatter(
+            xs,
+            ys,
+            c="orange",
+            s=s,
+            marker="o",
+            edgecolors="k",
+            linewidths=1.0,
+            zorder=5,
+        )
+        ax_xz.scatter(
+            xs,
+            zs,
+            c="orange",
+            s=s,
+            marker="o",
+            edgecolors="k",
+            linewidths=1.0,
+            zorder=5,
+        )
+        ax_yz.scatter(
+            ys,
+            zs,
+            c="orange",
+            s=s,
+            marker="o",
+            edgecolors="k",
+            linewidths=1.0,
+            zorder=5,
+        )
+
+        # Index labels
+        pe = [path_effects.withStroke(linewidth=1.5, foreground="k")]
+        for idx, (x, y, z) in enumerate(nodes3d):
+            text = str(idx)
+            ax3d.text(
+                x,
+                y,
+                z,
+                text,
+                va="center",
+                ha="center",
+                color="orange",
+                fontsize=8,
+                weight="bold",
+                path_effects=pe,
+                zorder=6,
+            )
+            ax_xy.text(
+                x,
+                y,
+                text,
+                va="center",
+                ha="center",
+                color="orange",
+                fontsize=8,
+                weight="bold",
+                path_effects=pe,
+                zorder=6,
+            )
+            ax_xz.text(
+                x,
+                z,
+                text,
+                va="center",
+                ha="center",
+                color="orange",
+                fontsize=8,
+                weight="bold",
+                path_effects=pe,
+                zorder=6,
+            )
+            ax_yz.text(
+                y,
+                z,
+                text,
+                va="center",
+                ha="center",
+                color="orange",
+                fontsize=8,
+                weight="bold",
+                path_effects=pe,
+                zorder=6,
+            )
+
+    def _plot_graph_edges_3d(
+        self,
+        ax3d,
+        ax_xy,
+        ax_xz,
+        ax_yz,
+        graph_nodes: np.ndarray,
+        graph_edges: np.ndarray,
+    ) -> None:
+        """
+        Plot graph edges as orange lines in 3D + projections.
+        """
+        nodes = np.asarray(graph_nodes, dtype=float)
+        edges = np.asarray(graph_edges, dtype=int)
+
+        if nodes.ndim != 2 or nodes.shape[1] not in (2, 3):
+            raise ValueError(
+                "graph_nodes must have shape (num_nodes, 2) or (num_nodes, 3); "
+                f"got {nodes.shape}"
+            )
+        if edges.ndim != 2 or edges.shape[1] != 2:
+            raise ValueError(
+                "graph_edges must have shape (num_edges, 2); "
+                f"got {edges.shape}"
+            )
+
+        if nodes.shape[1] == 3:
+            nodes3d = nodes
+        else:
+            z_default = float(self.cave_map.grid_min[2])
+            nodes3d = np.column_stack(
+                [nodes[:, 0], nodes[:, 1], np.full(nodes.shape[0], z_default)]
+            )
+
+        xs = nodes3d[:, 0]
+        ys = nodes3d[:, 1]
+        zs = nodes3d[:, 2]
+        num_nodes = nodes3d.shape[0]
+
+        for i, j in edges:
+            if not (0 <= i < num_nodes and 0 <= j < num_nodes):
+                continue
+            x0, y0, z0 = xs[i], ys[i], zs[i]
+            x1, y1, z1 = xs[j], ys[j], zs[j]
+
+            # 3D line
+            ax3d.plot(
+                [x0, x1],
+                [y0, y1],
+                [z0, z1],
+                color="orange",
+                linewidth=1.5,
+                zorder=4,
+            )
+
+            # XY projection
+            ax_xy.plot(
+                [x0, x1],
+                [y0, y1],
+                color="orange",
+                linewidth=1.5,
+                zorder=4,
+            )
+
+            # XZ projection
+            ax_xz.plot(
+                [x0, x1],
+                [z0, z1],
+                color="orange",
+                linewidth=1.5,
+                zorder=4,
+            )
+
+            # YZ projection
+            ax_yz.plot(
+                [y0, y1],
+                [z0, z1],
+                color="orange",
+                linewidth=1.5,
+                zorder=4,
+            )
+
+    # ------------------------------------------------------------------ #
     # Frame rendering                                                    #
     # ------------------------------------------------------------------ #
     def render_frame(
         self,
         frame_idx: int,
         *,
-        agent_positions: np.ndarray,
-        agent_colors: np.ndarray,
-        agent_alives: np.ndarray,
+        agent_positions: Optional[np.ndarray] = None,
+        agent_colors: Optional[np.ndarray] = None,
+        agent_alives: Optional[np.ndarray] = None,
         agent_communications_matrix: Optional[np.ndarray] = None,
         waypoint_positions: Optional[np.ndarray] = None,
+        graph_nodes: Optional[np.ndarray] = None,
+        graph_edges: Optional[np.ndarray] = None,
     ) -> Path:
         """
         Render a single frame.
 
-        For both modes, agent inputs are REQUIRED:
-        - agent_positions : (N, 2) or (N, 3) world coordinates
-        - agent_colors    : (N,) valid matplotlib color spec per agent
-        - agent_alives    : (N,) bool (True = alive, False = dead)
-        - agent_communications_matrix : optional (N, N) bool / {0,1}
+        Agent inputs are OPTIONAL:
+        - If agent_positions is None:
+            * No agents, waypoints, or communications are drawn.
+            * In 3D mode, slice is taken through the center of the cave extents.
+        - If agent_positions is provided:
+            * agent_colors and agent_alives must also be provided.
+            * Full agent, waypoint, and communications behavior is used.
 
-        Additionally (optional):
-        - waypoint_positions : (N, 2) or (N, 3) world coordinates for each
-          agent's *current* waypoint. These are drawn as large hollow circles
-          ("big O") in the agent's color. If None, no waypoint markers are drawn.
-
-        Dead agents are rendered as X markers in their color (with black outline).
-        Alive agents are rendered as filled circles with black outline.
-
-        - In 2D mode: agents are drawn in XY.
-        - In 3D mode: agents are drawn in 3D and projected onto XY/XZ/YZ slices.
-          The first agent's position is used as the slice location.
+        Graph inputs are OPTIONAL:
+        - graph_nodes: (num_nodes, 2 or 3)
+        - graph_edges: (num_edges, 2) with integer node indices
+        - If provided:
+            * Nodes are drawn in orange with index labels.
+            * Edges are drawn as orange lines between nodes.
         """
-        positions, colors, alives, comm = self._validate_agent_inputs(
-            agent_positions=agent_positions,
-            agent_colors=agent_colors,
-            agent_alives=agent_alives,
-            agent_communications_matrix=agent_communications_matrix,
-        )
+        # Normalize agent inputs (if provided)
+        if agent_positions is not None:
+            if agent_colors is None or agent_alives is None:
+                raise ValueError(
+                    "If agent_positions is provided, agent_colors and "
+                    "agent_alives must also be provided."
+                )
+
+            positions, colors, alives, comm = self._validate_agent_inputs(
+                agent_positions=agent_positions,
+                agent_colors=agent_colors,
+                agent_alives=agent_alives,
+                agent_communications_matrix=agent_communications_matrix,
+            )
+        else:
+            positions = None
+            colors = None
+            alives = None
+            # Without positions, we cannot meaningfully render communications
+            comm = None
 
         # Normalize waypoint_positions if provided
         if waypoint_positions is not None:
             wp = np.asarray(waypoint_positions, dtype=float)
-            if wp.ndim != 2 or wp.shape[0] != positions.shape[0]:
+            if wp.ndim != 2:
                 raise ValueError(
-                    "waypoint_positions must have shape (N, D) with same N as "
-                    f"agent_positions; got {wp.shape}, expected "
-                    f"({positions.shape[0]}, D)"
+                    "waypoint_positions must have shape (N, D); "
+                    f"got shape {wp.shape}"
                 )
             if wp.shape[1] not in (2, 3):
                 raise ValueError(
                     "waypoint_positions must be 2D or 3D points; "
                     f"got D={wp.shape[1]}"
                 )
+            # If agents are present, enforce matching N
+            if positions is not None and wp.shape[0] != positions.shape[0]:
+                raise ValueError(
+                    "waypoint_positions must have shape (N, D) with same N as "
+                    f"agent_positions; got {wp.shape}, expected "
+                    f"({positions.shape[0]}, D)"
+                )
         else:
             wp = None
 
+        # Normalize graph inputs if provided
+        graph_nodes_arr = None
+        graph_edges_arr = None
+        if graph_nodes is not None:
+            graph_nodes_arr = np.asarray(graph_nodes, dtype=float)
+            if graph_nodes_arr.ndim != 2 or graph_nodes_arr.shape[1] not in (2, 3):
+                raise ValueError(
+                    "graph_nodes must have shape (num_nodes, 2) or (num_nodes, 3); "
+                    f"got {graph_nodes_arr.shape}"
+                )
+        if graph_edges is not None:
+            graph_edges_arr = np.asarray(graph_edges, dtype=int)
+            # it can be empty
+            if graph_edges_arr.size == 0:
+                graph_edges_arr = graph_edges_arr.reshape((0, 2))
+            if graph_edges_arr.ndim != 2 or graph_edges_arr.shape[1] != 2:
+                raise ValueError(
+                    "graph_edges must have shape (num_edges, 2); "
+                    f"got {graph_edges_arr.shape}"
+                )
+
+        # ------------------------------------------------------------------ #
+        # 2D mode                                                            #
+        # ------------------------------------------------------------------ #
         if self.mode == "2d":
-            # ---------------------------------------------------------- #
-            # 2D frame                                                   #
-            # ---------------------------------------------------------- #
             ax = self.ax2d
             ax.clear()
 
             # Base occupancy plot
             self.plotter_2d.plot_occupancy(ax)
 
-            # Use XY only (drop Z if present)
-            if positions.shape[1] == 2:
+            # Agents (if any)
+            if positions is not None:
+                # Use XY only (drop Z if present)
                 xs = positions[:, 0]
                 ys = positions[:, 1]
-            else:
-                xs = positions[:, 0]
-                ys = positions[:, 1]
 
-            alive_mask = alives
-            dead_mask = ~alives
+                alive_mask = alives
+                dead_mask = ~alives
 
-            # Alive (circle with black outline)
-            if np.any(alive_mask):
-                ax.scatter(
-                    xs[alive_mask],
-                    ys[alive_mask],
-                    c=colors[alive_mask],
-                    s=40,
-                    marker="o",
-                    edgecolors="k",       # black outline
-                    linewidths=1.0,
-                    zorder=3,
-                )
-
-            # Dead agents: X with black outline AND color fill
-            if np.any(dead_mask):
-                # 1) Draw thick black X underneath
-                ax.scatter(
-                    xs[dead_mask],
-                    ys[dead_mask],
-                    c="black",
-                    s=60,
-                    marker="x",
-                    linewidths=3.0,       # thick: becomes the outline
-                    zorder=3,
-                )
-                # 2) Draw thinner colored X on top
-                ax.scatter(
-                    xs[dead_mask],
-                    ys[dead_mask],
-                    c=colors[dead_mask],
-                    s=60,
-                    marker="x",
-                    linewidths=2.0,       # thin colored X
-                    zorder=4,             # ensure drawn on top
-                )
-
-            # Waypoint markers: big hollow circles ("O") in agent color
-            if wp is not None:
-                # Use XY only
-                if wp.shape[1] == 2:
-                    wx = wp[:, 0]
-                    wy = wp[:, 1]
-                else:
-                    wx = wp[:, 0]
-                    wy = wp[:, 1]
-
-                # mask invalid waypoints (NaNs)
-                valid_mask = np.isfinite(wx) & np.isfinite(wy)
-                if np.any(valid_mask):
+                # Alive (circle with black outline)
+                if np.any(alive_mask):
                     ax.scatter(
-                        wx[valid_mask],
-                        wy[valid_mask],
-                        s=200,
-                        facecolors="none",
-                        edgecolors=colors[valid_mask],
-                        linewidths=2.0,
+                        xs[alive_mask],
+                        ys[alive_mask],
+                        c=colors[alive_mask],
+                        s=40,
                         marker="o",
-                        zorder=2.5,
+                        edgecolors="k",  # black outline
+                        linewidths=1.0,
+                        zorder=3,
                     )
 
-            # Communications: dashed bicolor lines between communicating ALIVE pairs
-            if comm is not None:
-                N = positions.shape[0]
-                for i in range(N):
-                    for j in range(i + 1, N):
-                        if not (alive_mask[i] and alive_mask[j]):
-                            continue
-                        if not (comm[i, j] or comm[j, i]):
-                            continue
-                        p0 = np.array([xs[i], ys[i]])
-                        p1 = np.array([xs[j], ys[j]])
-                        c0 = colors[i]
-                        c1 = colors[j]
-                        self._draw_bicolor_dashed_line_2d(
-                            ax, p0, p1, c0, c1, num_segments=20
+                # Dead agents: X with black outline AND color fill
+                if np.any(dead_mask):
+                    # 1) Draw thick black X underneath
+                    ax.scatter(
+                        xs[dead_mask],
+                        ys[dead_mask],
+                        c="black",
+                        s=60,
+                        marker="x",
+                        linewidths=3.0,  # thick: becomes the outline
+                        zorder=3,
+                    )
+                    # 2) Draw thinner colored X on top
+                    ax.scatter(
+                        xs[dead_mask],
+                        ys[dead_mask],
+                        c=colors[dead_mask],
+                        s=60,
+                        marker="x",
+                        linewidths=2.0,  # thin colored X
+                        zorder=4,  # ensure drawn on top
+                    )
+
+                # Waypoint markers: big hollow circles ("O") in agent color
+                if wp is not None:
+                    # Use XY only
+                    wx = wp[:, 0]
+                    wy = wp[:, 1]
+
+                    # mask invalid waypoints (NaNs)
+                    valid_mask = np.isfinite(wx) & np.isfinite(wy)
+
+                    if np.any(valid_mask):
+                        # Use per-agent colors if available; otherwise a default
+                        if colors is not None and colors.shape[0] >= wp.shape[0]:
+                            edgecols = colors[valid_mask]
+                        else:
+                            edgecols = "C0"
+
+                        ax.scatter(
+                            wx[valid_mask],
+                            wy[valid_mask],
+                            s=200,
+                            facecolors="none",
+                            edgecolors=edgecols,
+                            linewidths=2.0,
+                            marker="o",
+                            zorder=2.5,
                         )
+
+                # Communications: dashed bicolor lines between communicating ALIVE pairs
+                if comm is not None:
+                    N = positions.shape[0]
+                    for i in range(N):
+                        for j in range(i + 1, N):
+                            if not (alive_mask[i] and alive_mask[j]):
+                                continue
+                            if not (comm[i, j] or comm[j, i]):
+                                continue
+                            p0 = np.array([xs[i], ys[i]])
+                            p1 = np.array([xs[j], ys[j]])
+                            c0 = colors[i]
+                            c1 = colors[j]
+                            self._draw_bicolor_dashed_line_2d(
+                                ax, p0, p1, c0, c1, num_segments=20
+                            )
+
+                # Agent index labels (same style as before)
+                pe = [path_effects.withStroke(linewidth=1.5, foreground="k")]
+                for agent_idx, (x, y) in enumerate(zip(xs, ys)):
+                    c = colors[agent_idx]
+                    ax.text(
+                        x,
+                        y,
+                        str(agent_idx),
+                        va="center",
+                        ha="center",
+                        color=c,
+                        fontsize=8,
+                        weight="bold",
+                        path_effects=pe,
+                        zorder=5,
+                    )
+
+            # Graph nodes/edges (if provided)
+            if graph_nodes_arr is not None:
+                self._plot_graph_nodes_2d(ax, graph_nodes_arr)
+            if graph_nodes_arr is not None and graph_edges_arr is not None:
+                self._plot_graph_edges_2d(ax, graph_nodes_arr, graph_edges_arr)
 
             self.fig.suptitle(self.cave_name)
             self.fig.tight_layout()
@@ -381,9 +748,9 @@ class PlottingOrchestrator:
             self.fig.savefig(frame_path, dpi=self.dpi)
             return frame_path
 
-        # -------------------------------------------------------------- #
-        # 3D frame                                                       #
-        # -------------------------------------------------------------- #
+        # ------------------------------------------------------------------ #
+        # 3D mode                                                            #
+        # ------------------------------------------------------------------ #
         ax3d = self.ax3d
         ax_xy = self.ax_xy
         ax_xz = self.ax_xz
@@ -403,24 +770,37 @@ class PlottingOrchestrator:
         )
 
         # Ensure we have 3D positions for plotting/slicing
-        if positions.shape[1] == 3:
-            positions3d = positions
+        if positions is not None:
+            if positions.shape[1] == 3:
+                positions3d = positions
+            else:
+                # If only XY provided, lift into 3D using grid_min[2]
+                z_default = float(self.cave_map.grid_min[2])
+                positions3d = np.column_stack(
+                    [
+                        positions[:, 0],
+                        positions[:, 1],
+                        np.full(len(positions), z_default),
+                    ]
+                )
+
+            xs = positions3d[:, 0]
+            ys = positions3d[:, 1]
+            zs = positions3d[:, 2]
+
+            alive_mask = alives
+            dead_mask = ~alives
         else:
-            # If only XY provided, lift into 3D using grid_min[2]
-            z_default = float(self.cave_map.grid_min[2])
-            positions3d = np.column_stack(
-                [positions[:, 0], positions[:, 1], np.full(len(positions), z_default)]
-            )
+            # No agents: use empty arrays
+            positions3d = np.empty((0, 3), dtype=float)
+            xs = positions3d[:, 0]
+            ys = positions3d[:, 1]
+            zs = positions3d[:, 2]
+            alive_mask = np.zeros(0, dtype=bool)
+            dead_mask = np.zeros(0, dtype=bool)
 
-        xs = positions3d[:, 0]
-        ys = positions3d[:, 1]
-        zs = positions3d[:, 2]
-
-        alive_mask = alives
-        dead_mask = ~alives
-
-        # Handle waypoint positions in 3D (if provided)
-        if wp is not None:
+        # Handle waypoint positions in 3D (if provided AND agents exist)
+        if wp is not None and positions3d.shape[0] > 0:
             if wp.shape[1] == 3:
                 wp3d = wp
             else:
@@ -438,8 +818,15 @@ class PlottingOrchestrator:
             wp_valid_mask = None
             wx = wy = wz = None  # for type checkers
 
-        # Choose slice point as the FIRST agent's position (regardless of alive)
-        slice_point = positions3d[0]
+        # Choose slice point:
+        # - If there is at least one agent, use the first agent's position.
+        # - Otherwise, use the center of the cave extents.
+        if positions3d.shape[0] > 0:
+            slice_point = positions3d[0]
+        else:
+            grid_min = np.asarray(self.cave_map.grid_min, dtype=float)
+            grid_max = np.asarray(self.cave_map.grid_max, dtype=float)
+            slice_point = 0.5 * (grid_min + grid_max)
 
         # XY / XZ / YZ slices through slice_point
         self.plotter_3d.plot_xy_slice_through_point(
@@ -591,94 +978,70 @@ class PlottingOrchestrator:
             )
 
         # Regardless of alive or dead, put the agent's index
-        # as a small number as a lower indices, with the agent's fill
-        # color and a black outline.
-        for agent_idx, pos in enumerate(positions3d):
-            x, y, z = pos
-            c = colors[agent_idx]
+        # as a small number with the agent's fill color and a black outline.
+        if positions3d.shape[0] > 0:
+            pe = [path_effects.withStroke(linewidth=1.5, foreground="k")]
+            for agent_idx, pos in enumerate(positions3d):
+                x, y, z = pos
+                c = colors[agent_idx]
 
-            # z order so it's always above the agent marker
-            zorder = 5
-
-            # Text should be offset so it looks like an indedx
-            text = f"{agent_idx}"
-
-            # font size to fit in circle
-            fontsize = 8
-
-            # vertically alignment
-            va = "center"
-
-            # horizontally alignment
-            ha = "center"
-
-            # 3D text
-            ax3d.text(
-                x,
-                y,
-                z,
-                text,
-                va=va,
-                ha=ha,
-                color=c,
-                fontsize=fontsize,
-                weight="bold",
-                path_effects=[
-                    path_effects.withStroke(linewidth=1.5, foreground="k")
-                ],
-                zorder=zorder,
-            )
-
-            # XY projection
-            ax_xy.text(
-                x,
-                y,
-                text,
-                va=va,
-                ha=ha,
-                color=c,
-                fontsize=fontsize,
-                weight="bold",
-                path_effects=[
-                    path_effects.withStroke(linewidth=1.5, foreground="k")
-                ],
-                zorder=zorder,
-            )
-
-            # XZ projection
-            ax_xz.text(
-                x,
-                z,
-                text,
-                va=va,
-                ha=ha,
-                color=c,
-                fontsize=fontsize,
-                weight="bold",
-                path_effects=[
-                    path_effects.withStroke(linewidth=1.5, foreground="k")
-                ],
-                zorder=zorder,
-            )
-
-            # YZ projection
-            ax_yz.text(
-                y,
-                z,
-                text,
-                va=va,
-                ha=ha,
-                color=c,
-                fontsize=fontsize,
-                weight="bold",
-                path_effects=[
-                    path_effects.withStroke(linewidth=1.5, foreground="k")
-                ],
-                zorder=zorder,
-            )
+                ax3d.text(
+                    x,
+                    y,
+                    z,
+                    str(agent_idx),
+                    va="center",
+                    ha="center",
+                    color=c,
+                    fontsize=8,
+                    weight="bold",
+                    path_effects=pe,
+                    zorder=5,
+                )
+                ax_xy.text(
+                    x,
+                    y,
+                    str(agent_idx),
+                    va="center",
+                    ha="center",
+                    color=c,
+                    fontsize=8,
+                    weight="bold",
+                    path_effects=pe,
+                    zorder=5,
+                )
+                ax_xz.text(
+                    x,
+                    z,
+                    str(agent_idx),
+                    va="center",
+                    ha="center",
+                    color=c,
+                    fontsize=8,
+                    weight="bold",
+                    path_effects=pe,
+                    zorder=5,
+                )
+                ax_yz.text(
+                    y,
+                    z,
+                    str(agent_idx),
+                    va="center",
+                    ha="center",
+                    color=c,
+                    fontsize=8,
+                    weight="bold",
+                    path_effects=pe,
+                    zorder=5,
+                )
 
         # Waypoints in 3D: big hollow circles ("O") in agent color
-        if wp3d is not None and wp_valid_mask is not None and np.any(wp_valid_mask):
+        if (
+            positions3d.shape[0] > 0
+            and wp3d is not None
+            and wp_valid_mask is not None
+            and np.any(wp_valid_mask)
+        ):
             wx_valid = wx[wp_valid_mask]
             wy_valid = wy[wp_valid_mask]
             wz_valid = wz[wp_valid_mask]
@@ -697,9 +1060,7 @@ class PlottingOrchestrator:
                 depthshade=False,
             )
 
-            # A tiny little number to their top right, indicating 
-            # which agent, and what waypoint # it is for that agent.
-            # TODO
+            # TODO: tiny little number indicating which agent / waypoint index
 
             # Projections
             ax_xy.scatter(
@@ -731,7 +1092,7 @@ class PlottingOrchestrator:
             )
 
         # Communications: dashed bicolor lines between communicating ALIVE pairs
-        if comm is not None:
+        if comm is not None and positions3d.shape[0] > 0:
             N = positions3d.shape[0]
             for i in range(N):
                 for j in range(i + 1, N):
@@ -776,6 +1137,25 @@ class PlottingOrchestrator:
                         c1,
                         num_segments=20,
                     )
+
+        # Graph nodes/edges (if provided)
+        if graph_nodes_arr is not None:
+            self._plot_graph_nodes_3d(
+                ax3d,
+                ax_xy,
+                ax_xz,
+                ax_yz,
+                graph_nodes_arr,
+            )
+        if graph_nodes_arr is not None and graph_edges_arr is not None:
+            self._plot_graph_edges_3d(
+                ax3d,
+                ax_xy,
+                ax_xz,
+                ax_yz,
+                graph_nodes_arr,
+                graph_edges_arr,
+            )
 
         self.fig.suptitle(f"{self.cave_name} – frame {frame_idx:03d}")
         self.fig.tight_layout()

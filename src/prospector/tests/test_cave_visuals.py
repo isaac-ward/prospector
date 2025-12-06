@@ -59,7 +59,6 @@ def main(args: DictConfig):
             frame_idx=0
         )
         print(f"  - Saved 2D frame for {cave_name} to: {frame2d_path}")
-        print(f"  - Also saved 2D occupancy image to: {orch_2d.single_image_path}")
 
         # ------------------------------------------------------------------
         # 3D cave map + 3D orchestrator / animation
@@ -89,22 +88,10 @@ def main(args: DictConfig):
         max_xyz = cave_map_3d.grid_max
         num_frames = 100
         agent_positions = np.linspace(min_xyz, max_xyz, num=num_frames)
-
-        print(
-            f"  - Rendering 3D + slice animation for {cave_name} "
-            f"({num_frames} frames) ..."
+        
+        orch_3d.render_frame(
+            frame_idx=0, 
         )
-
-        for frame_idx, agent_pos in enumerate(
-            tqdm(agent_positions, desc=f"Rendering {cave_name} animation", unit="frame")
-        ):
-            orch_3d.render_frame(
-                frame_idx=frame_idx, 
-                agent_pos_world=agent_pos
-            )
-
-        video_path = orch_3d.finalize_video(output_name=f"{cave_name}_3d")
-        print(f"  - Saved 3D animation video for {cave_name} to: {video_path}")
 
     print("[test_caves_matplotlib] Done.")
 
