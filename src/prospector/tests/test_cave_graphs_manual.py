@@ -8,6 +8,7 @@ from omegaconf import OmegaConf, DictConfig
 from tqdm import tqdm
 import hydra
 import json
+import shutil
 
 from prospector.utils.custom_logging import make_log_dir, get_repo_root_dir, get_assets_dir, get_assets_dir
 from prospector.utils.plotting_orchestrator import PlottingOrchestrator
@@ -34,7 +35,7 @@ def main(args: DictConfig):
     log_dir = Path(log_dir)
 
     cave_names = ["chamber", "tunnels"]
-    num_nodes_list = [15]
+    num_nodes_list = [10, 15]
 
     rng = np.random.default_rng(seed=args.get("seed", 42))
 
@@ -116,6 +117,8 @@ def main(args: DictConfig):
                 )
                 # Rename 0000.png to graph_communications.png
                 (graph_path_output / f"{cave_name}_{dim}_frames" / "0000.png").rename(graph_path_output / "graph_communications.png")
+                # Remove the frames directory
+                shutil.rmtree(graph_path_output / f"{cave_name}_{dim}_frames")
 
                 # Save the npz file with keys nodes, edges, and comms 
                 np.savez_compressed(
