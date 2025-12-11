@@ -40,7 +40,7 @@ If you use this code in your research, please cite:
 
 ```bibtex
 @misc{ward2025prospector,
-  author = {Isaac Ronald Ward, Mark Paral, Kristopher Riordan, Maximilian Adang, Michelle Ho},
+  author = {Isaac Ronald Ward, Mark Paral, Kristopher Riordan, Maximilian Adang, Michelle Ho, Mykel Kochenderfer},
   title = {Prospector: a Cave Simulation Environment for Rotorcraft},
   year = {2025},
   publisher = {Stanford University},
