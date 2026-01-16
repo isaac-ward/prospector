@@ -292,8 +292,8 @@ def main(args: DictConfig):
             if num_agents > 0:
                 pbar.set_postfix(
                     {
-                        "wp0": int(info["current_subtask_idx"][0]),
-                        "r0": float(reward[0]),
+                        "ag0wp": int(info["current_subtask_idx"][0]),
+                        "ag0r": f"{reward[0]:.1e}",
                     }
                 )
 

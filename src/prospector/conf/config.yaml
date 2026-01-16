@@ -30,6 +30,46 @@ simulation:
   num_steps_to_simulate_after_completion: 50
 
 # ----------------------------------------------------------------
+# Relating to the environment / simulation settings
+# ----------------------------------------------------------------
+environment:
+
+  max_episode_length: 1000
+
+# ----------------------------------------------------------------
+# Relating to rewards
+# ----------------------------------------------------------------
+rewards:
+
+  waypoint_following:
+    distance_weight: 1.0
+    control_effort_weight: 0.1
+    collision_penalty: 1e6
+    # If this is higher, then the agent can be within this number
+    # * their agent_radius of the goal to consider it reached
+    multiplier_within_radius_of_goal: 3.0
+
+# ----------------------------------------------------------------
+# Relating to policies
+# ----------------------------------------------------------------
+policies:
+
+  policy_mppi:
+    num_samples: 32
+    horizon: 10
+    lambda_: 1.0
+    noise_std: 0.05
+    sampling_mode: "uniform"  # uniform | gaussian
+
+# ----------------------------------------------------------------
+# Relating to agents
+# ----------------------------------------------------------------
+agents:
+
+  agent_radius: 0.1
+  history_length: 16
+
+# ----------------------------------------------------------------
 # Relating to the loading, processing, and plotting of the cave data
 # ----------------------------------------------------------------
 caves:
@@ -112,46 +152,6 @@ caves:
       obstacle_points:
         max_num: 20000
         alpha: 0.1
-
-# ----------------------------------------------------------------
-# Relating to rewards
-# ----------------------------------------------------------------
-rewards:
-
-  waypoint_following:
-    distance_weight: 1.0
-    control_effort_weight: 0.1
-    collision_penalty: 1e6
-    # If this is higher, then the agent can be within this number
-    # * their agent_radius of the goal to consider it reached
-    multiplier_within_radius_of_goal: 3.0
-
-# ----------------------------------------------------------------
-# Relating to policies
-# ----------------------------------------------------------------
-policies:
-
-  policy_mppi:
-    num_samples: 32
-    horizon: 10
-    lambda_: 1.0
-    noise_std: 0.05
-    sampling_mode: "uniform"  # uniform | gaussian
-
-# ----------------------------------------------------------------
-# Relating to agents
-# ----------------------------------------------------------------
-agents:
-
-  agent_radius: 0.1
-  history_length: 16
-
-# ----------------------------------------------------------------
-# Relating to the environment / simulation settings
-# ----------------------------------------------------------------
-environment:
-
-  max_episode_length: 1000
 
 # ----------------------------------------------------------------
 # Relating to the underlying physical dynamics models
