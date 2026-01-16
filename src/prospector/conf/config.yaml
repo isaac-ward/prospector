@@ -7,7 +7,7 @@ simulation:
   # cave to explore: chamber | tunnels | grapevine
   cave: grapevine
   agents:
-    num_agents: 3
+    num_agents: 2
     # policy to use: policy_random | policy_mppi
     policy: policy_mppi
   render:
@@ -18,8 +18,31 @@ simulation:
     # Making this < 1 will speed up rendering at the cost of 
     # quality/layout niceness
     figure_size_multiplier: 1.0
-  # How many random waypoints to task each agent with reaching?
+  # How many waypoints to task each agent with reaching?
   num_waypoints: 8
+  # You can also provide your own waypoints manually, but they 
+  # must be per agent, and they need to be with reference
+  # to a cave's graph coordinate system, not world coordinates.
+  graph_waypoints_provided: true 
+  # This file relates the graph waypoints to world coordinates.
+  graph_waypoints_file: "src/prospector/caves/example_graphs/chamber/3d/15/graph.npz"
+  #graph_waypoints_file: "src/prospector/caves/example_graphs/tunnels/3d/15/graph.npz"
+  # From the paper, we provide these example waypoints:
+  graph_waypoints:
+    [
+      # Agent 1
+      [0, 5, 10, 4, 1, 3, 6, 13, 14, 13, 6, 5],
+      # Agent 2
+      [0, 11, 7, 11, 0, 12, 8, 12, 2, 9, 1, 0]
+    ]
+  # graph_waypoints:
+  #   [
+  #     # Agent 1
+  #     [0, 9, 13, 9, 0, 2, 6, 5, 7, 8 ,7, 5, 6, 2]
+  #     # Agent 2
+  #     [0, 1, 10, 11, 10, 3, 4, 12, 4, 14, 5, 6, 2, 0]
+  #   ]
+
   # After reaching all waypoints, how many steps to continue simulating
   num_steps_to_simulate_after_completion: 50
 

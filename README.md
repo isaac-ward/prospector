@@ -22,10 +22,14 @@ uv sync
 To run the project use:
 
 ```bash
-uv run python src/prospector/main.py
-uv run --env-file .env -- python -m prospector.tests.test_caves_matplotlib
-uv run --env-file .env -- python -m prospector.tests.test_simulation
+# Produces the cave graphs (i.e. nodes and edges)
+# for all the caves
 uv run --env-file .env -- python -m prospector.tests.test_cave_graphs
+# Produces renders in matplotlib of all the caves
+uv run --env-file .env -- python -m prospector.tests.test_caves_matplotlib
+# Runs a simulation of the controller in the cave
+# according to the config.yaml
+uv run --env-file .env -- python -m prospector.tests.test_simulation
 
 # For example, how to test with different parameters:
 uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=chamber

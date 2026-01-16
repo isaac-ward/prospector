@@ -159,6 +159,9 @@ def main(args: DictConfig):
             rng=rng,
         )  # shape (num_waypoints, world_dim)
 
+        # Or provide your own, per agent
+        waypoint_points_world = 
+
         # Compress world coords to state position dimensions
         waypoint_points_task = waypoint_points_world[:, position_dims]
 
