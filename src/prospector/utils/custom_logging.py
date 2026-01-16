@@ -38,6 +38,9 @@ def get_cache_dir():
 def get_weights_dir():
     return os.path.join(get_saved_dir(), "weights")
 
+def get_assets_dir():
+    return os.path.join(get_repo_root_dir(), "src", "assets")
+
 def log_figure_to_wandb(figure, key: str):
     """
     Save a Matplotlib figure to a temporary PNG (dpi=600), log it to W&B, then close the figure.

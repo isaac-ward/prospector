@@ -2,7 +2,7 @@
 
 # Prerequisites
 
-- Install uv from https://uv.readthedocs.io/en/latest/installation.html
+- Install uv from https://docs.astral.sh/uv/getting-started/installation/
 - Install Git LFS from https://git-lfs.com/
 
 # Running this
@@ -22,13 +22,14 @@ uv sync
 To run the project use:
 
 ```bash
-# Produces the cave graphs (i.e. nodes and edges)
-# for all the caves
-uv run --env-file .env -- python -m prospector.tests.test_cave_graphs
-# Produces renders in matplotlib of all the caves
-uv run --env-file .env -- python -m prospector.tests.test_caves_matplotlib
-# Runs a simulation of the controller in the cave
-# according to the config.yaml
+# Plot cave visuals (2d or 3d) for all the caves
+# provided in this repo
+uv run --env-file .env -- python -m prospector.tests.test_cave_visuals
+# Test cave graph (nodes and edges type graph)
+# generation (automatic and manual)
+uv run --env-file .env -- python -m prospector.tests.test_cave_graphs_automatic
+uv run --env-file .env -- python -m prospector.tests.test_cave_graphs_manual
+# Run a full simulation with the config.yaml parameters
 uv run --env-file .env -- python -m prospector.tests.test_simulation
 
 # For example, how to test with different parameters:
@@ -42,8 +43,8 @@ uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.
 If you use this code in your research, please cite:
 
 ```bibtex
-@misc{your_citation_key,
-  author = {Isaac Ronald Ward, Mark Paral, Kristopher Riordan, Maximilian Adang, Michelle Ho},
+@misc{ward2025prospector,
+  author = {Isaac Ronald Ward, Mark Paral, Kristopher Riordan, Maximilian Adang, Michelle Ho, Mykel J. Kochenderfer},
   title = {Prospector: a Cave Simulation Environment for Rotorcraft},
   year = {2025},
   publisher = {Stanford University},

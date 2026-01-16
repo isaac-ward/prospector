@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 from typing import Dict, Any, List
+import json
 
 import numpy as np
 import jax.numpy as jnp
@@ -49,7 +50,7 @@ def main(args: DictConfig):
     # ------------------------------------------------------------------ #
     # Setup logging directory                                            #
     # ------------------------------------------------------------------ #
-    log_dir = make_log_dir(prefix="test_simulation")
+    log_dir = make_log_dir(suffix="test_simulation")
     print(f"[test_simulation] Logging to: {log_dir}")
 
     repo_root = Path(get_repo_root_dir())
@@ -152,21 +153,51 @@ def main(args: DictConfig):
     tasks: List[TaskWaypointFollowing] = []
 
     for agent_idx in range(num_agents):
-        # Sample waypoints in free space; ensure some separation
-        waypoint_points_world = cave_map.sample_free_points(
-            num_points=num_waypoints,
-            min_distance=agent_radius * 2.0,
-            rng=rng,
-        )  # shape (num_waypoints, world_dim)
 
-        # Or provide your own, per agent
-        waypoint_points_world = 
+        # Either load provided waypoints from config (graph coords)
+        # If requested, the config must have both 
+        # graph_waypoints_file and  graph_waypoints keys
+        if  args.simulation.use_provided_graph_waypoints and \
+            hasattr(cave_cfg, "graph_waypoints_file") and \
+            cave_cfg.graph_waypoints_file and \
+            hasattr(cave_cfg, "graph_waypoints") and \
+            cave_cfg.graph_waypoints:            
 
-        # Compress world coords to state position dimensions
-        waypoint_points_task = waypoint_points_world[:, position_dims]
+            print(f"[test_simulation] Using provided graph waypoints at '{cave_cfg.graph_waypoints_file}'")
+
+            # Load it (it's a json)
+            with open(cave_cfg.graph_waypoints_file, "r") as f:
+                graph_to_world_coordinates_data = json.load(f)
+                        
+            # There must be waypoints for each agent
+            assert hasattr(cave_cfg, "graph_waypoints"), \
+                f"Cave config for '{cave_name}' must have 'graph_waypoints' key if " \
+                f"use_provided_graph_waypoints is True."
+            assert len(cave_cfg.graph_waypoints) == num_agents, \
+                f"Number of provided waypoint sets ({len(cave_cfg.graph_waypoints)}) " \
+                f"must match number of agents ({num_agents})."
+            waypoints_graph = cave_cfg.graph_waypoints[agent_idx]
+            waypoints_world = np.array(graph_to_world_coordinates_data["nodes"])[waypoints_graph]
+            # Assert that all these are 3d points
+            assert waypoints_world.shape[1] == 3, \
+                f"Expected waypoint dimension ({waypoints_world.shape[1]}) to match is_3d={is_3d}"
+            waypoints = np.asarray(waypoints_world, dtype=np.float64)
+
+        else:
+            print(f"[test_simulation] Sampling random waypoints for agent {agent_idx} ...")
+
+            # Sample waypoints in free space; ensure some separation
+            waypoints_world = cave_map.sample_free_points(
+                num_points=num_waypoints,
+                min_distance=agent_radius * 2.0,
+                rng=rng,
+            )  # shape (num_waypoints, world_dim)
+
+            # Compress world coords to state position dimensions
+            waypoints = waypoints_world[:, position_dims]
 
         task = TaskWaypointFollowing(
-            waypoints=waypoint_points_task,
+            waypoints=waypoints,
             position_dims=position_dims,
             cave_map=cave_map,
             agent_radius=agent_radius,
