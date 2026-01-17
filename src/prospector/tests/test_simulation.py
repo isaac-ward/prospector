@@ -303,7 +303,7 @@ def main(args: DictConfig):
             if num_agents > 0:
                 pbar.set_postfix(
                     {
-                        "ag0wp": f"{int(info["current_subtask_idx"][0])} / {tasks[0].num_waypoints}",
+                        "ag0wp": f"{int(info['current_subtask_idx'][0])} / {tasks[0]._num_subtasks}",
                         "ag0r": f"{reward[0]:.1e}",
                         "dones": f"{sum(done)} / {num_agents}",
                     }
