@@ -243,6 +243,7 @@ class CaveMap3DPlotter:
         ax: matplotlib.axes.Axes,
         agent_world_pos: Sequence[float],
         *,
+        agent_0_color: Optional[Sequence[str]] = None,
         clear: bool = True,
         **imshow_kwargs,
     ):
@@ -281,7 +282,15 @@ class CaveMap3DPlotter:
         ax.set_xlabel("x [world]")
         ax.set_ylabel("z [world]")
         ax.set_aspect("equal")
-        ax.set_title(f"XZ slice @ y-index {iy}\nabout agent=0")
+        # If the agent colors are provided, color ONLY the 
+        # 'agent=0' text in the title accordingly
+        if agent_0_color is not None:
+            ax.set_title(
+                f"XZ slice @ y-index {iy}\nabout agent=0",
+                color=agent_0_color,
+            )
+        else:
+            ax.set_title(f"XZ slice @ y-index {iy}\nabout agent=0")
 
         return img
 
@@ -290,6 +299,7 @@ class CaveMap3DPlotter:
         ax: matplotlib.axes.Axes,
         agent_world_pos: Sequence[float],
         *,
+        agent_0_color: Optional[Sequence[str]] = None,
         clear: bool = True,
         **imshow_kwargs,
     ):
@@ -328,6 +338,14 @@ class CaveMap3DPlotter:
         ax.set_xlabel("y [world]")
         ax.set_ylabel("z [world]")
         ax.set_aspect("equal")
-        ax.set_title(f"YZ slice @ x-index {ix}\nabout agent=0")
+        # If the agent colors are provided, color ONLY the 
+        # 'agent=0' text in the title accordingly
+        if agent_0_color is not None:
+            ax.set_title(
+                f"YZ slice @ x-index {ix}\nabout agent=0",
+                color=agent_0_color,
+            )
+        else:
+            ax.set_title(f"YZ slice @ x-index {ix}\nabout agent=0")
 
         return img

@@ -11,6 +11,7 @@ Note that Git LFS is used to manage large files in this repository. Make sure to
 
 ```bash
 git lfs pull
+git lfs fetch --all
 ```
 
 To install dependencies use:

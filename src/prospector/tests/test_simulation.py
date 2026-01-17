@@ -183,6 +183,12 @@ def main(args: DictConfig):
                 f"Expected waypoint dimension ({waypoints_world.shape[1]}) to match is_3d={is_3d}"
             waypoints = np.asarray(waypoints_world, dtype=np.float64)
 
+            # If the waypoints were provided, overwrite the initial position to be the first waypoint
+            initial_state[agent_idx, position_dims] = waypoints[0, :]
+            # And remove the first waypoint from the list
+            waypoints = waypoints[1:, :]
+            print(f"[test_simulation] Overwriting initial position of agent {agent_idx} to first provided waypoint: {waypoints[0]}")
+
         else:
             print(f"[test_simulation] Sampling random waypoints for agent {agent_idx} ...")
 
@@ -211,7 +217,7 @@ def main(args: DictConfig):
     print("[test_simulation] Waypoints per agent (task coords):")
     for i, task in enumerate(tasks):
         # this attribute name matches the implementation we wrote earlier
-        print(f"  agent {i}: {np.asarray(task._waypoints)}")  # type: ignore[attr-defined]
+        print(f"  agent {i}: {len(waypoints)} waypoints to reach\n{np.asarray(task._waypoints)}")  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------ #
     # Instantiate per-agent policies + MultiAgent                        #
@@ -266,6 +272,7 @@ def main(args: DictConfig):
         agents=agents,
         initial_state=initial_state,
         render=args.simulation.render.enabled,
+        render_fps=args.simulation.render.fps,
         log_dir=log_dir,
         cave_name=cave_name,
         agent_colors=agent_colors,
@@ -299,13 +306,26 @@ def main(args: DictConfig):
 
         # Also end episode if all agents are done or have completed their tasks
         if done.all():
-            print("[test_simulation] All agents done (dead); ending episode early.")
-            break
+            print(f"[test_simulation] All agents done (dead); ending episode in {num_steps_to_simulate_after_completion} steps.")
+            num_steps_to_simulate_after_completion -= 1
+            if num_steps_to_simulate_after_completion <= 0:
+                break
         if env.all_tasks_completed():
             print(f"[test_simulation] All agents completed their tasks; ending episode in {num_steps_to_simulate_after_completion} steps.")
             num_steps_to_simulate_after_completion -= 1
             if num_steps_to_simulate_after_completion <= 0:
                 break
+
+    # We now want to export the simulator products
+
+    # First export the agent trajectories (full state, action, every tick, for each agent)
+    # as numpy arrays
+    trajectories_path = env.export_agent_trajectories(
+        save_as_numpy=True,
+        save_as_csv=True,
+        save_as_json=True,
+    )
+    print(f"[test_simulation] Agent trajectories saved to: {trajectories_path}")
 
     # Export video of the simulation (env owns the orchestrator).
     video_path = env.finalize_video(output_name=f"{cave_name}_simulation")

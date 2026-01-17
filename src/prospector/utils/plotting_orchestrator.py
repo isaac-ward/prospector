@@ -535,6 +535,10 @@ class PlottingOrchestrator:
         waypoint_positions: Optional[np.ndarray] = None,
         graph_nodes: Optional[np.ndarray] = None,
         graph_edges: Optional[np.ndarray] = None,
+        # Need full agent data to render the following (optional features)
+        full_agent_data: Optional = None,
+        render_trajectories: bool = True,
+        render_highlighted_communications_in_trajectories: bool = False,
     ) -> Path:
         """
         Render a single frame.
@@ -735,6 +739,22 @@ class PlottingOrchestrator:
                         zorder=5,
                     )
 
+                # Render agent trajectories (if requested)
+                if render_trajectories and full_agent_data is not None:
+                    # For each agent, get its trajectory from the full agent data
+                    for agent_idx in range(full_agent_data.num_agents):
+                        s, a = full_agent_data.get_full_history_for_agent(agent_idx)
+
+                        # Plot trajectory line
+                        ax.plot(
+                            s[:, 0],  # x
+                            s[:, 1],  # y
+                            color=colors[agent_idx],
+                            linewidth=1.0,
+                            linestyle="-",
+                            #zorder=1,
+                        )
+
             # Graph nodes/edges (if provided)
             if graph_nodes_arr is not None:
                 self._plot_graph_nodes_2d(ax, graph_nodes_arr)
@@ -898,6 +918,51 @@ class PlottingOrchestrator:
                 edgecolors="k",
                 linewidths=1,
             )
+
+        # If requested, render agent trajectories (3D + projections)
+        if (render_trajectories and full_agent_data is not None):
+            for agent_idx in range(full_agent_data.num_agents):
+                s, a = full_agent_data.get_full_history_for_agent(agent_idx)
+
+                # 3D trajectory
+                ax3d.plot(
+                    s[:, 0],  # x
+                    s[:, 1],  # y
+                    s[:, 2],  # z
+                    color=colors[agent_idx],
+                    linewidth=1.0,
+                    linestyle="-",
+                    #zorder=1,
+                )
+
+                # XY projection 
+                # The tails only make sense in the top down plot, 
+                # so we draw them there as well.
+                ax_xy.plot(
+                    s[:, 0],  # x
+                    s[:, 1],  # y
+                    color=colors[agent_idx],
+                    linewidth=1.0,
+                    linestyle="-",
+                )
+
+                # # XZ projection
+                # ax_xz.plot(
+                #     s[:, 0],  # x
+                #     s[:, 2],  # z
+                #     color=colors[agent_idx],
+                #     linewidth=1.0,
+                #     linestyle="-",
+                # )
+
+                # # YZ projection
+                # ax_yz.plot(
+                #     s[:, 1],  # y
+                #     s[:, 2],  # z
+                #     color=colors[agent_idx],
+                #     linewidth=1.0,
+                #     linestyle="-",
+                # )
 
         # Dead agents: X markers with black outline hack (3D + projections)
         if np.any(dead_mask):

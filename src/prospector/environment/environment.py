@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Tuple, Optional, Sequence
 
 import jax.numpy as jnp
 import numpy as np
+import json
 
 from ..dynamics.base_dynamics import BaseDynamics
 from ..agents.agent_multi import MultiAgent
@@ -42,8 +43,8 @@ class ProspectorEnvironment:
         initial_state: jnp.ndarray,
         config: Any,
         *,
-
         render: bool = False,
+        render_fps: int = 24,
         log_dir: Optional[str | Path] = None,
         cave_name: Optional[str] = None,
         agent_colors: Optional[np.ndarray] = None,
@@ -151,7 +152,7 @@ class ProspectorEnvironment:
                 cave_map=cave_map,
                 cave_name=f"{cave_name}_sim",
                 log_dir=log_dir,
-                fps=24,
+                fps=render_fps,
                 max_obstacle_points_3d=cave_cfg.plotting.obstacle_points.max_num,
                 alpha_obstacles_3d=cave_cfg.plotting.obstacle_points.alpha,
                 figure_size_multiplier=config.simulation.render.figure_size_multiplier,
@@ -391,6 +392,9 @@ class ProspectorEnvironment:
                 agent_alives=alive_mask,
                 agent_communications_matrix=comms_matrix,
                 waypoint_positions=waypoint_positions,
+                full_agent_data=self._agents,
+                render_trajectories=True,
+                render_highlighted_communications_in_trajectories=True,
             )
 
         return self._state, reward, done, info
@@ -421,6 +425,51 @@ class ProspectorEnvironment:
 
         video_path = self._orch.finalize_video(output_name=output_name)
         return Path(video_path)
+
+    def export_agent_trajectories(
+        self,
+        save_as_numpy=True,
+        save_as_json=False,
+        save_as_csv=False,
+    ) -> Optional[Tuple[List[np.ndarray], List[np.ndarray]]]:
+        """
+        Write the per-agent trajectories (state and action histories) to
+        numpy arrays saved to disk.
+        """
+
+        for i in range(self._agents.num_agents):
+            states, actions = self._agents.get_full_history_for_agent(i)
+            print(f"[ProspectorEnvironment] Exporting trajectory for agent {i}:")
+            print(f"  States shape: {states.shape}")
+            print(f"  Actions shape: {actions.shape}")
+
+            # Are we saving to numpy?
+            if save_as_numpy:
+                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}.npz"
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(filepath, states=states, actions=actions)
+            
+            # Are we saving as JSON?
+            if save_as_json:
+                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}.json"
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                traj_dict = {
+                    "states": states.tolist(),
+                    "actions": actions.tolist(),
+                }
+                with open(filepath, 'w') as f:
+                    json.dump(traj_dict, f, indent=4)
+
+            # Are we saving as CSV?
+            if save_as_csv:
+                # Use numpy's csv functionality
+                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}_states.csv"
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                np.savetxt(filepath, states, delimiter=",")
+                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}_actions.csv"
+                np.savetxt(filepath, actions, delimiter=",")
+        
+        return self._orch.log_dir / "trajectories"
 
     # Convenience properties
     # ------------------------------------------------------------------ #

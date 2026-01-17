@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
-import open3d as o3d
+from plyfile import PlyData
 from tqdm import tqdm
 
 from .utils.grid_ops import (
@@ -76,8 +76,14 @@ class CaveMap2D:
             raise FileNotFoundError(f"PLY file not found: {ply_path}")
 
         print(f"[CaveMap2D] Loading point cloud from {ply_path} ...")
-        pcd = o3d.io.read_point_cloud(str(ply_path))
-        points = np.asarray(pcd.points, dtype=np.float64)
+        # Load from the path
+        ply = PlyData.read(str(ply_path))
+        # Expect standard vertex fields
+        vertex = ply["vertex"]
+        points = np.stack(
+            [vertex["x"], vertex["y"], vertex["z"]],
+            axis=1,
+        ).astype(np.float64)
 
         if points.size == 0:
             raise ValueError(f"Point cloud is empty: {ply_path}")

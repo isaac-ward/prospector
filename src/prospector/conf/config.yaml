@@ -5,7 +5,7 @@ simulation:
   # dynamics model to use: dynamics_2d_linear | dynamics_3d_linear | dynamics_3d
   dynamics_model: dynamics_3d_linear
   # cave to explore: chamber | tunnels | grapevine
-  cave: chamber
+  cave: tunnels
   agents:
     num_agents: 2
     # policy to use: policy_random | policy_mppi
@@ -18,6 +18,9 @@ simulation:
     # Making this < 1 will speed up rendering at the cost of 
     # quality/layout niceness
     figure_size_multiplier: 1.0
+    # For dt's of 0.25 I recommend fps of 25,
+    # for dt's of 0.1 I recommend fps of 50-60
+    fps: 60
   # How many waypoints to task each agent with reaching?
   num_waypoints: 8
   # You can also provide your own waypoints manually, but they 
@@ -34,7 +37,7 @@ simulation:
 # ----------------------------------------------------------------
 environment:
 
-  max_episode_length: 1000
+  max_episode_length: 4096
 
 # ----------------------------------------------------------------
 # Relating to rewards
@@ -173,7 +176,7 @@ dynamics:
     position_dimensions: [0, 1]
 
   dynamics_3d_linear:
-    dt: 0.25
+    dt: 0.1 # 0.25
     # State is [x, y, z]
     state_dim: 3
     state_limits:
@@ -183,9 +186,9 @@ dynamics:
     # Action is [ux, uy, uz]
     action_dim: 3
     action_limits:
-      - [-2, 2]
-      - [-2, 2]
-      - [-2, 2]
+      - [-1, 1]
+      - [-1, 1]
+      - [-1, 1]
     position_dimensions: [0, 1, 2]
 
   dynamics_3d:
