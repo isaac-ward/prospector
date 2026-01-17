@@ -291,16 +291,21 @@ def main(args: DictConfig):
     print(f"[test_simulation] Running simulation for {num_steps} steps ...")
     pbar = tqdm(range(num_steps), desc="Simulation", unit="step")
 
+    # Save the information over time
+    infos = []
+
     num_steps_to_simulate_after_completion = int(args.simulation.num_steps_to_simulate_after_completion)
     for _ in pbar:
         state, reward, done, info = env.step()  # env handles render_frame internally
+        infos.append(info)
 
         if "current_subtask_idx" in info and isinstance(info["current_subtask_idx"], list):
             if num_agents > 0:
                 pbar.set_postfix(
                     {
-                        "ag0wp": int(info["current_subtask_idx"][0]),
+                        "ag0wp": f"{int(info["current_subtask_idx"][0])} / {tasks[0].num_waypoints}",
                         "ag0r": f"{reward[0]:.1e}",
+                        "dones": f"{sum(done)} / {num_agents}",
                     }
                 )
 
@@ -317,6 +322,10 @@ def main(args: DictConfig):
                 break
 
     # We now want to export the simulator products
+
+    # Export the infos (it's a list of dicts)
+    infos_path = env.export_infos(infos)
+    print(f"[test_simulation] Infos saved to: {infos_path}")    
 
     # First export the agent trajectories (full state, action, every tick, for each agent)
     # as numpy arrays

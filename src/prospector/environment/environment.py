@@ -471,6 +471,28 @@ class ProspectorEnvironment:
         
         return self._orch.log_dir / "trajectories"
 
+    def export_infos(
+        self,
+        infos: List[Dict[str, Any]],
+    ) -> Optional[Path]:
+        """
+        Export the list of info dicts collected over the simulation.
+
+        Parameters
+        ----------
+        infos : list of dict
+            List of info dictionaries from each step.
+
+        Returns
+        -------
+        infos_path : Path or None
+        """
+        
+        filepath = self._orch.log_dir / "infos.json"
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, 'w') as f:
+            json.dump(infos, f, indent=4)
+
     # Convenience properties
     # ------------------------------------------------------------------ #
     @property
