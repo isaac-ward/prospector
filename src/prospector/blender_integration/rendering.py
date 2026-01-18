@@ -26,6 +26,56 @@ DEFAULT_RENDER_FIRST_N_FRAMES: Optional[int] = None
 # Small helpers
 # ---------------------------------------------------------------------
 
+def _hierarchy_objects(root: bpy.types.Object) -> List[bpy.types.Object]:
+    return [root] + list(root.children_recursive)
+
+def _hierarchy_names(root: bpy.types.Object) -> List[str]:
+    return [o.name for o in _hierarchy_objects(root)]
+
+def _find_quad_root_for_agent(agent_id: str) -> bpy.types.Object:
+    """
+    Find the duplicated quad root for agent_id.
+    Handles accidental Blender suffixes like quad_agent_0.001.
+    """
+    exact = bpy.data.objects.get(f"quad_agent_{agent_id}")
+    if exact is not None:
+        return exact
+
+    prefix = f"quad_agent_{agent_id}."
+    for o in bpy.data.objects:
+        if o.name.startswith(prefix):
+            return o
+
+    raise KeyError(f"Could not find quad root for agent_id={agent_id} (expected 'quad_agent_{agent_id}'*)")
+
+def _find_all_quad_roots() -> List[bpy.types.Object]:
+    """
+    Return roots named quad_agent_<id> (with optional .### suffix).
+    We assume these are the top-level parent objects for each quad hierarchy.
+    """
+    roots = []
+    for o in bpy.data.objects:
+        if o.name.startswith("quad_agent_"):
+            # likely a root; we prefer ones that have children
+            roots.append(o)
+
+    # Deduplicate by base "quad_agent_X" (ignore .001)
+    def base(n: str) -> str:
+        return n.split(".")[0]
+
+    uniq: Dict[str, bpy.types.Object] = {}
+    for o in roots:
+        b = base(o.name)
+        # prefer the one that actually has children (more likely root)
+        if b not in uniq:
+            uniq[b] = o
+        else:
+            if len(o.children_recursive) > len(uniq[b].children_recursive):
+                uniq[b] = o
+
+    return list(uniq.values())
+
+
 def _find_object(name: str) -> bpy.types.Object:
     obj = bpy.data.objects.get(name)
     if obj is None:
@@ -199,6 +249,14 @@ def render_all_views(
     obj_bbox = _find_object(f"{cave_name}_bounding_box")
     obj_open_top = _find_object(f"{cave_name}_open_top")
 
+    # Find stuff
+    quad_names: List[str] = []
+    for qroot in _find_all_quad_roots():
+        quad_names.extend(_hierarchy_names(qroot))
+
+    curve_names = [o.name for o in bpy.data.objects if o.name.startswith("traj_agent_")]
+    agent_cam_names = [o.name for o in bpy.data.objects if o.type == "CAMERA" and o.name.startswith("camera_agent_")]
+
     # -------------------------
     # 1) Angled overhead view
     # -------------------------
@@ -212,9 +270,11 @@ def render_all_views(
             obj_open_top.name,
             # keep your agents/curves visible too:
             # (we do NOT hide them; so include them explicitly)
-            *[o.name for o in bpy.data.objects if o.name.startswith("quad_agent_")],
-            *[o.name for o in bpy.data.objects if o.name.startswith("traj_agent_")],
-            *[o.name for o in bpy.data.objects if o.name.startswith("camera_agent_")],
+            *quad_names,
+            *curve_names,
+            *agent_cam_names,
+            # Keep the sun visible too
+            "sun",
         ]
     )
     try:
@@ -267,9 +327,12 @@ def render_all_views(
                     cam.name,
                     obj_enclosed.name,
                     obj_bbox.name,
-                    *[o.name for o in bpy.data.objects if o.name == f"quad_agent_{aid}" or o.name.startswith(f"quad_agent_{aid}.")],
-                    *[o.name for o in bpy.data.objects if o.name == f"traj_agent_{aid}" or o.name.startswith(f"traj_agent_{aid}.")],
-                    # (optional) also include other agents if you want them visible in POV; right now only self
+                    # agents/curves visibility
+                    *quad_names,
+                    #*curve_names,
+                    *agent_cam_names,
+                    # Keep the sun visible too
+                    "sun",
                 ]
             )
             try:
@@ -289,8 +352,13 @@ def render_all_views(
                 render_visible_names=[
                     cam.name,
                     obj_open_top.name,
-                    *[o.name for o in bpy.data.objects if o.name == f"quad_agent_{aid}" or o.name.startswith(f"quad_agent_{aid}.")],
-                    *[o.name for o in bpy.data.objects if o.name == f"traj_agent_{aid}" or o.name.startswith(f"traj_agent_{aid}.")],
+                    # keep your agents/curves visible too:
+                    # (we do NOT hide them; so include them explicitly)
+                    *quad_names,
+                    *curve_names,
+                    *agent_cam_names,
+                    # Keep the sun visible too
+                    "sun",
                 ]
             )
             try:

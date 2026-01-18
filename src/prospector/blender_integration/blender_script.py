@@ -162,10 +162,10 @@ def main(
         if render_first_n_frames is None:
             render_first_n_frames = num_total_frames
         print(
-            f"[Prospector] Rendering enabled: rendering {render_first_n_frames} / {num_total_frames} frames..."
+            f"[Prospector] Rendering enabled: rendering {render_first_n_frames} / {num_total_frames} frames to: {lf}"
         )
         render_all_views(
-            log_folder_path=log_folder,
+            log_folder_path=lf,
             first_n_frames=render_first_n_frames,
         )
 
