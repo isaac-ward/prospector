@@ -1,4 +1,4 @@
-# src/prospector/agents/colors.py
+# src/prospector/blender_integration/colors.py
 
 def get_agent_color_list(num_agents: int) -> list:
     """
@@ -28,4 +28,5 @@ def get_agent_color_list(num_agents: int) -> list:
         [155, 156, 7],
         [0, 157, 173],
     ]
+    # Into the range 0-1
     return [ [c / 255.0 for c in cols[i]] for i in range(num_agents) ]
