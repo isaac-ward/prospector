@@ -55,6 +55,16 @@ def load_agent_trajectory(
             rx, ry, rz = float(s[3]), float(s[4]), float(s[5])
             rotations.append((rx, ry, rz))
 
+    # Compute and report the average distance between positions
+    total_dist = 0.0
+    for i in range(1, len(positions)):
+        x0, y0, z0 = positions[i - 1]
+        x1, y1, z1 = positions[i]
+        dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2 + (z1 - z0) ** 2) ** 0.5
+        total_dist += dist
+    avg_dist = total_dist / max(1, len(positions) - 1)
+    print(f"[load_agent_trajectory] Loaded trajectory for agent_id={infer_agent_id(json_path)} with {len(positions)} steps, avg step distance={avg_dist:.4f} (divide by dt for average speed)")
+
     if smooth_positions:
         smoothed_positions: List[Tuple[float, float, float]] = []
         n = len(positions)

@@ -21,6 +21,8 @@ simulation:
     # For dt's of 0.25 I recommend fps of 25,
     # for dt's of 0.1 I recommend fps of 50-60
     fps: 60
+  post_processing:
+    render_blender_outputs_folder: "run_2026_01_17_17_29_12_test_simulation"
   # How many waypoints to task each agent with reaching?
   num_waypoints: 8
   # You can also provide your own waypoints manually, but they 
@@ -31,6 +33,25 @@ simulation:
 
   # After reaching all waypoints, how many steps to continue simulating
   num_steps_to_simulate_after_completion: 50
+
+# ----------------------------------------------------------------
+# Settings for using background blender
+# ----------------------------------------------------------------
+blender:
+  # NOTE: set this to your blender install
+  # TODO: download from the web if not found?
+  blender_executable_path: "C:/Users/moose/Desktop/apps/blender-4.5.4-windows-x64/blender-4.5.4-windows-x64/blender.exe"
+  relative_to_repo_blend_file_path: "src/assets/darpa2.blend"
+  # Arguments to the run file
+  log_folder_to_process: "run_2026_01_17_17_29_08_test_simulation"
+  #log_folder_to_process: "run_2026_01_17_17_29_12_test_simulation"
+  # Must be true to actually render headlessly
+  render: true
+  # If set to a number, will only render this many frames from the start, 
+  # If set to null, will render all frames
+  render_first_n_frames: null
+  # If true, will skip rendering frames that already have images rendered
+  skip_existing_renders: false
 
 # ----------------------------------------------------------------
 # Relating to the environment / simulation settings

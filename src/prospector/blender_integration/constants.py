@@ -23,7 +23,7 @@ SCENE_FPS = 60
 EPS_NORM = 1e-8
 
 # Curve rendering defaults
-CURVE_BEVEL_DEPTH = 0.05
+CURVE_BEVEL_DEPTH = 0.08
 CURVE_RESOLUTION_U = 8
 
 # ---------------------------------------------------------------------
@@ -37,7 +37,9 @@ BLADE_OBJECT_NAMES = (
     "blade3",
 )
 
-BLADE_RPM = 500.0
+# 1000 ensures that with full motion blur in render, adjacent frames
+# will have a full revolution of blur
+BLADE_RPM = 1000.0
 
 # Per-blade direction multipliers (+1 CCW, -1 CW) around LOCAL +Z.
 # This pattern is typical for quads (alternating).

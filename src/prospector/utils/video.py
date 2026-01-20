@@ -1,5 +1,3 @@
-# utils/image_folder_to_video.py
-
 from __future__ import annotations
 
 import os
@@ -7,6 +5,8 @@ from pathlib import Path
 from typing import List
 
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+from tqdm import tqdm
+from proglog import ProgressBarLogger
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
@@ -36,6 +36,52 @@ def _collect_images(folder: Path) -> List[Path]:
     return files
 
 
+class _TqdmMoviePyLogger(ProgressBarLogger):
+    """
+    MoviePy progress logger that updates a tqdm bar.
+
+    MoviePy/Proglog may report progress either as:
+      - bar='t', attr='index'  (integer step counter)
+      - bar='t', attr='progress' (float 0..1)
+      - other variants depending on MoviePy version
+    We handle both.
+    """
+    def __init__(self, *, total_frames: int, desc: str) -> None:
+        super().__init__()
+        self._total = int(total_frames)
+        self._pbar = tqdm(total=self._total, desc=desc, unit="frame")
+        self._last_n = 0  # last frame count reflected in the bar
+
+    def _set_to(self, n: int) -> None:
+        n = max(0, min(self._total, int(n)))
+        delta = n - self._last_n
+        if delta > 0:
+            self._pbar.update(delta)
+            self._last_n = n
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        # Most common: frames index
+        if attr == "index":
+            try:
+                self._set_to(int(value))
+            except Exception:
+                return
+
+        # Some versions report progress as 0..1
+        if attr == "progress":
+            try:
+                p = float(value)
+                self._set_to(int(round(p * self._total)))
+            except Exception:
+                return
+
+    def close(self) -> None:
+        try:
+            self._pbar.close()
+        except Exception:
+            pass
+
+
 def image_folder_to_video(
     filepath_image_folder: str | os.PathLike,
     filepath_output_video: str | os.PathLike,
@@ -62,20 +108,39 @@ def image_folder_to_video(
     folder = Path(filepath_image_folder)
     output = Path(filepath_output_video)
 
-    # Warn if user forgot extension
     if output.suffix.lower() != ".mp4":
         print(f"[warning] Output filename does not end with '.mp4': {output}")
 
     image_files = _collect_images(folder)
+
+    # Helpful sanity: show which ffmpeg moviepy will try to use
+    try:
+        from moviepy.config import get_setting
+        print(f"[image_folder_to_video] MoviePy FFMPEG_BINARY: {get_setting('FFMPEG_BINARY')}")
+    except Exception:
+        pass
+
+    print(f"[image_folder_to_video] Image collected, writing video to: {output} ...")
+
     clip = ImageSequenceClip([str(p) for p in image_files], fps=fps)
 
-    # Don't want all the obnoxious logging from MoviePy here
-    clip.write_videofile(
-        str(output),
-        fps=fps,
-        codec="libx264",
-        audio=False,
-        logger=None,
-    )
-    clip.close()
+    logger = _TqdmMoviePyLogger(total_frames=len(image_files), desc=f"Writing {output.name}")
+
+    try:
+        clip.write_videofile(
+            str(output),
+            fps=fps,
+            codec="libx264",
+            audio=False,
+            logger=logger,  # keep it minimal, but real
+        )
+    finally:
+        try:
+            clip.close()
+        finally:
+            logger.close()
+
+    if not output.exists():
+        raise RuntimeError(f"MoviePy finished but output file does not exist: {output}")
+
     return output

@@ -12,9 +12,11 @@ def run(
     log_folder: str,
     render: bool = False,
     render_first_n_frames: Optional[int] = None,
+    skip_existing_renders: bool = True,
 ) -> None:
     main(
         log_folder=log_folder,
         render=render,
         render_first_n_frames=render_first_n_frames,
+        skip_existing_renders=skip_existing_renders,
     )

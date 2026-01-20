@@ -5,8 +5,10 @@ from pathlib import Path
 import bpy
 
 log_folder = "run_2026_01_17_17_29_08_test_simulation"
+cave_name = None  # e.g., "chamber" or "tunnels"
 render = True
-render_first_n_frames = 2
+render_first_n_frames = None
+skip_existing_renders = True
 
 def find_repo_root(start: Path) -> Path:
     start = start.resolve()
@@ -109,5 +111,6 @@ if DEV_RELOAD:
 run(
     log_folder=log_folder, 
     render=render,
-    render_first_n_frames=render_first_n_frames
+    render_first_n_frames=render_first_n_frames,
+    skip_existing_renders=skip_existing_renders
 )

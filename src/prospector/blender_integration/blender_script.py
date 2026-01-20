@@ -45,6 +45,7 @@ def main(
     log_folder: str,
     render: bool = False,
     render_first_n_frames: Optional[int] = None,
+    skip_existing_renders: bool = True,
 ) -> None:
     repo_root = find_repo_root_from_blend()
     lf = resolve_log_folder(repo_root, log_folder)
@@ -167,6 +168,7 @@ def main(
         render_all_views(
             log_folder_path=lf,
             first_n_frames=render_first_n_frames,
+            skip_existing_renders=skip_existing_renders,
         )
 
     print("[Prospector] Done.")

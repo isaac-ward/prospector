@@ -110,34 +110,43 @@ def _iter_frames(scene: bpy.types.Scene, *, first_n: Optional[int]) -> List[int]
     return frames
 
 
-def infer_cave_name_from_scene() -> str:
+def infer_cave_name_from_scene(log_folder_path) -> str:
     """
     Infer cave_name from object naming convention:
       <cave_name>_enclosed
       <cave_name>_bounding_box
       <cave_name>_open_top
+
+    We can find the cave_name because the file <cave_name>_simulation.mp4 is in the log folder.
+    ️
     """
-    suffixes = ("_enclosed", "_bounding_box", "_open_top")
-    candidates: Dict[str, int] = {}
+    # suffixes = ("_enclosed", "_bounding_box", "_open_top")
+    # candidates: Dict[str, int] = {}
 
-    for obj in bpy.data.objects:
-        n = obj.name
-        for suf in suffixes:
-            if n.endswith(suf):
-                base = n[: -len(suf)]
-                candidates[base] = candidates.get(base, 0) + 1
+    # for obj in bpy.data.objects:
+    #     n = obj.name
+    #     for suf in suffixes:
+    #         if n.endswith(suf):
+    #             base = n[: -len(suf)]
+    #             candidates[base] = candidates.get(base, 0) + 1
 
-    if not candidates:
-        raise RuntimeError(
-            "Could not infer cave_name. Expected objects like '<cave_name>_enclosed' "
-            "and/or '<cave_name>_open_top' to exist in the .blend."
-        )
+    # if not candidates:
+    #     raise RuntimeError(
+    #         "Could not infer cave_name. Expected objects like '<cave_name>_enclosed' "
+    #         "and/or '<cave_name>_open_top' to exist in the .blend."
+    #     )
 
-    # prefer one that matches most suffixes
-    cave_name, score = sorted(candidates.items(), key=lambda kv: kv[1], reverse=True)[0]
-    if score < 1:
-        raise RuntimeError("infer_cave_name_from_scene found no valid cave candidates")
-    return cave_name
+    # # prefer one that matches most suffixes
+    # cave_name, score = sorted(candidates.items(), key=lambda kv: kv[1], reverse=True)[0]
+    # if score < 1:
+    #     raise RuntimeError("infer_cave_name_from_scene found no valid cave candidates")
+    # return cave_name
+
+    # Alternative: infer from log folder
+    for p in log_folder_path.iterdir():
+        if p.is_file() and p.name.endswith("_simulation.mp4"):
+            name = p.name[: -len("_simulation.mp4")]
+            return name
 
 
 @dataclass
@@ -194,6 +203,7 @@ def render_frames_from_camera(
     camera_obj: bpy.types.Object,
     out_dir: Path,
     first_n_frames: Optional[int] = DEFAULT_RENDER_FIRST_N_FRAMES,
+    skip_existing_renders: bool = True,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -211,6 +221,11 @@ def render_frames_from_camera(
     for f in frames:
         scene.frame_set(int(f))
         fp = _frame_path(out_dir, int(f))
+
+        # Skip if already rendered
+        if skip_existing_renders and fp.exists():
+            continue
+
         scene.render.filepath = str(fp)
         bpy.ops.render.render(write_still=True)
 
@@ -221,11 +236,15 @@ def render_frames_from_camera(
 # View orchestration (your 3 view families)
 # ---------------------------------------------------------------------
 
+def _frame_filepath(folder: Path, frame: int, ext: str) -> Path:
+    return folder / f"{frame:06d}.{ext}"
+
 def render_all_views(
     *,
     log_folder_path: Path,
     cave_name: Optional[str] = None,
     first_n_frames: Optional[int] = None,
+    skip_existing_renders: bool = True,
 ) -> None:
     """
     Renders:
@@ -239,7 +258,7 @@ def render_all_views(
     scene = bpy.context.scene
 
     if cave_name is None:
-        cave_name = infer_cave_name_from_scene()
+        cave_name = infer_cave_name_from_scene(log_folder_path)
 
     renders_root = Path(log_folder_path) / "blender_renders"
     renders_root.mkdir(parents=True, exist_ok=True)
@@ -283,6 +302,7 @@ def render_all_views(
             camera_obj=overhead_cam,
             out_dir=renders_root / "overhead",
             first_n_frames=first_n_frames,
+            skip_existing_renders=skip_existing_renders,
         )
     finally:
         restore_visibility(snap)
@@ -341,6 +361,7 @@ def render_all_views(
                     camera_obj=cam,
                     out_dir=renders_root / f"agent_{aid}_pov",
                     first_n_frames=first_n_frames,
+                    skip_existing_renders=skip_existing_renders,
                 )
             finally:
                 restore_visibility(snap)
@@ -367,6 +388,7 @@ def render_all_views(
                     camera_obj=cam,
                     out_dir=renders_root / f"agent_{aid}_top_down",
                     first_n_frames=first_n_frames,
+                    skip_existing_renders=skip_existing_renders,
                 )
             finally:
                 restore_visibility(snap)

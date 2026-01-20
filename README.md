@@ -36,7 +36,10 @@ uv run --env-file .env -- python -m prospector.tests.test_simulation
 # For example, how to test with different parameters:
 uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=chamber
 uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=tunnels
-uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=tunnels simulation.dynamics_model=dynamics_2d_linear
+uv run --env-file .env -- python -m prospector.tests.test_simulation simulation.cave=chamber simulation.dynamics_model=dynamics_2d_linear
+# And to render blender outputs to video
+uv run --env-file .env -- python -m prospector.tests.test_blender_render_headless
+uv run --env-file .env -- python -m prospector.tests.test_blender_outputs_to_video
 ```
 
 # Citation
