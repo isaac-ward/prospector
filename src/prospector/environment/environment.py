@@ -15,6 +15,7 @@ from ..caves.cave_map_2d import CaveMap2D
 from ..caves.cave_map_3d import CaveMap3D
 from ..utils.plotting_orchestrator import PlottingOrchestrator
 from ..tasks.task_waypoint_following import TaskWaypointFollowing
+from ..utils.json_utils import dump_json
 
 
 AliveFn = Callable[[jnp.ndarray], bool]
@@ -360,7 +361,7 @@ class ProspectorEnvironment:
                     comms_matrix[i, j] = 1
                     comms_matrix[j, i] = 1
         # Mirror it (note: this will double the 1s to 2s as written).
-        comms_matrix += comms_matrix.T
+        # comms_matrix += comms_matrix.T
 
         info: Dict[str, Any] = {
             "actions": actions,
@@ -487,11 +488,10 @@ class ProspectorEnvironment:
         -------
         infos_path : Path or None
         """
-        
         filepath = self._orch.log_dir / "infos.json"
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        with open(filepath, 'w') as f:
-            json.dump(infos, f, indent=4)
+        dump_json(filepath, infos, indent=4)
+        return filepath
 
     # Convenience properties
     # ------------------------------------------------------------------ #
