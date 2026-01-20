@@ -58,10 +58,15 @@ rewards:
 policies:
 
   policy_mppi:
-    num_samples: 32
-    horizon: 10
-    lambda_: 1.0
-    noise_std: 0.05
+    num_samples: 2048 # 32 is all you need for linear dynamics
+    horizon: 20 # 10 is all you need for linear dynamics
+    # Lambda range is (0, inf)
+    # If lambda is small, this approaches picking the max-reward action
+    # If lambda is large, this approaches uniform weighting
+    lambda_: 0.05 # 1.0 works for linear dynamics
+    # Higher noise std means more exploration when selecting
+    # actions based on the previous best action
+    noise_std: 1 # 0.05 works for linear dynamics
     sampling_mode: "uniform"  # uniform | gaussian
 
 # ----------------------------------------------------------------
@@ -210,9 +215,12 @@ dynamics:
       - [null, null]
     # Action is [w_rotor_1, w_rotor_2, w_rotor_3, w_rotor_4]
     action_dim: 4
+    # Typical multirotor rotor speeds are on the order of hundreds to ~1,200 rad/s
     action_limits:
-      - [-0.5, 0.5]
-      - [-0.5, 0.5]
-      - [-0.5, 0.5]
-      - [-0.5, 0.5]
+    # 2 is too high, as is 3
+    # 1.5 is a ground crash
+      - [0.0, 1.75]
+      - [0.0, 1.75]
+      - [0.0, 1.75]
+      - [0.0, 1.75]
     position_dimensions: [0, 1, 2]

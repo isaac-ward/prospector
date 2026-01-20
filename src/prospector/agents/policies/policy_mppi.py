@@ -268,6 +268,8 @@ class PolicyMPPI(BasePolicy):
         first_actions = action_sequences[:, 0, :]
 
         # MPPI-style weights: w_k ∝ exp((r_k - max_r) / lambda)
+        # If lambda is small, this approaches picking the max-reward action.
+        # If lambda is large, this approaches uniform weighting.
         max_r = jnp.max(rewards_jnp)
         scaled = (rewards_jnp - max_r) / self.lambda_
         weights = jnp.exp(scaled)
