@@ -1,0 +1,5 @@
+# Keep shell scripts and the asset-sync data files as LF regardless of platform.
+# Windows autocrlf would otherwise inject CRLF and break bash execution / URL building.
+*.sh text eol=lf
+scripts/assets-filter.txt text eol=lf
+scripts/assets-manifest.txt text eol=lf

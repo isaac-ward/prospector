@@ -11,21 +11,21 @@ This replaced Git LFS, which can't hold files over 2 GB on GitHub (e.g.
 
 The bucket is public-read, so pulling requires no credentials:
 
-```powershell
-./scripts/assets-pull.ps1
+```bash
+./scripts/assets-pull.sh
 ```
 
 It downloads everything listed in `assets-manifest.txt`. `curl -C -` resumes
 interrupted transfers, so just re-run if a big file drops.
 
-> If it 404s, check the `$Endpoint` at the top of `assets-pull.ps1` matches the
+> If it 404s, check the `ENDPOINT` at the top of `assets-pull.sh` matches the
 > "Endpoint" shown on the bucket's details page in Backblaze.
 
 ## Uploading assets (maintainers)
 
-```powershell
-winget install Rclone.Rclone      # one-time, if rclone is missing
-./scripts/assets-push.ps1
+```bash
+# one-time, if rclone is missing:  https://rclone.org/downloads/
+./scripts/assets-push.sh
 ```
 
 The script **prompts** for your B2 `keyID` and `applicationKey` each run and
@@ -41,5 +41,5 @@ backups are excluded. Push uses `rclone copy` and never deletes remote files.
 | What | Where | Default |
 |------|-------|---------|
 | Bucket name | `PROSPECTOR_ASSETS_BUCKET` env, or script default | `isaacronaldward-prospector` |
-| S3 endpoint (pull) | `PROSPECTOR_ASSETS_ENDPOINT` env, or `assets-pull.ps1` | `s3.us-west-004.backblazeb2.com` |
+| S3 endpoint (pull) | `PROSPECTOR_ASSETS_ENDPOINT` env, or `assets-pull.sh` | `s3.us-west-004.backblazeb2.com` |
 | B2 credentials (push) | prompted at run time | — never stored |

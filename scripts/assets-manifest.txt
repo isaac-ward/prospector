@@ -1,5 +1,5 @@
 # Assets stored in the external B2 bucket, one filename per line (relative to src/assets).
-# Used by assets-pull.ps1 to know what to download. Auto-refreshed by assets-push.ps1
+# Used by assets-pull.sh to know what to download. Auto-refreshed by assets-push.sh
 # (commit this file after a push so teammates pull the right set).
 chamber.ply
 darpa2.blend
