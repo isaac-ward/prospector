@@ -28,9 +28,9 @@ interrupted transfers, so just re-run if a big file drops.
 ./scripts/assets-push.sh
 ```
 
-The script **prompts** for your B2 `keyID` and `applicationKey` each run and
-uses them in-memory only — **nothing is written to disk or committed**. Get a
-key from Backblaze → **App Keys** (restrict it to this bucket, read+write).
+The `keyID` is hardcoded (not sensitive). The script **prompts** only for the
+secret `applicationKey` each run and uses it in-memory only — **nothing is
+written to disk or committed**. Get a key from Backblaze → **App Keys**.
 After a push it refreshes `assets-manifest.txt`; commit that file.
 
 Only `*.blend` and `*.ply` sync (see `assets-filter.txt`); `.blend1` autosave

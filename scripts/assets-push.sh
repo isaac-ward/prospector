@@ -23,8 +23,9 @@ MANIFEST="$SCRIPT_DIR/assets-manifest.txt"
 
 command -v rclone >/dev/null 2>&1 || { echo "rclone not found. Install it: https://rclone.org/downloads/" >&2; exit 1; }
 
-# --- Prompt for credentials (kept in the environment only, wiped on exit) ---
-read -r  -p "B2 keyID: "          KEY_ID
+# keyID is not sensitive (like a username) -- hardcoded. Only the applicationKey
+# is secret, so that's all we prompt for (kept in the environment only, wiped on exit).
+KEY_ID="004c72b46e813800000000002"
 read -rs -p "B2 applicationKey: " APP_KEY
 echo
 
