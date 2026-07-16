@@ -1,0 +1,6 @@
+# rclone filter: which files under src/assets sync to the external backend.
+# Used by both assets-pull.ps1 and assets-push.ps1.
+# .blend1 are Blender autosave backups -> intentionally excluded to save space.
++ *.blend
++ *.ply
+- *

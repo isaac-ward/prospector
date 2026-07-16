@@ -7,8 +7,12 @@ outputs/
 logs/
 saved/
 git-filter-repo.py
-src/assets/darpa2.blend
-src/assets/darpa2.blend1
+
+# Large 3D assets — stored on external backend (Google Drive) via rclone,
+# NOT in git. Sync with scripts/assets-pull.ps1 / scripts/assets-push.ps1
+src/assets/*.blend
+src/assets/*.blend1
+src/assets/*.ply
 
 
 # C extensions
