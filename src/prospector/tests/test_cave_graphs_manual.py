@@ -35,7 +35,7 @@ def main(args: DictConfig):
     log_dir = Path(log_dir)
 
     cave_names = ["chamber", "tunnels"]
-    num_nodes_list = [10, 15]
+    num_nodes_list = [10, 15, 20, 25, 30]
 
     rng = np.random.default_rng(seed=args.get("seed", 42))
 
@@ -46,7 +46,7 @@ def main(args: DictConfig):
         print(f"\n[test_cave_graphs_manual] Building maps for cave='{cave_name}' ...")
 
 
-        for dim in ["2d", "3d"]:
+        for dim in ["3d"]:
             print(f"[test_cave_graphs_manual]   Processing {dim} graphs...")
             
             # Get the cave information
@@ -125,6 +125,7 @@ def main(args: DictConfig):
                     graph_path_output / "graph.npz",
                     nodes=nodes,
                     edges=edges,
+                    A=comms_matrix,
                     comms=comms_matrix,
                 )
 
