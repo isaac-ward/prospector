@@ -3,16 +3,20 @@
 # Prerequisites
 
 - Install uv from https://docs.astral.sh/uv/getting-started/installation/
-- Install Git LFS from https://git-lfs.com/
+- `curl` (ships with macOS, Linux, and Windows 10+) — used to fetch large assets
+- `rclone` from https://rclone.org/downloads/ — only needed if you will *upload* assets
 
 # Running this
 
-Note that Git LFS is used to manage large files in this repository. Make sure to pull the large files after cloning the repository:
+Large 3D assets (`.blend` / `.ply`) are **not** stored in git — they live in a
+public Backblaze B2 bucket. After cloning, fetch them (no credentials needed):
 
 ```bash
-git lfs pull
-git lfs fetch --all
+./scripts/assets-pull.sh
 ```
+
+See [`scripts/ASSETS.md`](scripts/ASSETS.md) for details, and for how maintainers
+upload new/changed assets.
 
 To install dependencies use:
 
