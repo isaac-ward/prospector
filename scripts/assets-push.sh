@@ -40,11 +40,13 @@ echo "Uploading assets:  $ASSETS_DIR  ->  b2:$BUCKET"
 rclone copy "$ASSETS_DIR" ":b2:$BUCKET" --filter-from "$FILTER" --progress --transfers 4
 
 # Refresh the manifest so pulls stay in sync with what's in the bucket.
+# Recurse into subdirectories (point_clouds/, blender/) and record paths
+# RELATIVE to src/assets, so pulls recreate the same layout.
 {
-  echo "# Assets stored in the external B2 bucket, one filename per line (relative to src/assets)."
+  echo "# Assets stored in the external B2 bucket, one path per line (relative to src/assets)."
   echo "# Used by assets-pull.sh to know what to download. Auto-refreshed by assets-push.sh"
   echo "# (commit this file after a push so teammates pull the right set)."
-  find "$ASSETS_DIR" -maxdepth 1 -type f \( -name '*.blend' -o -name '*.ply' \) | sed 's#.*/##' | sort
+  ( cd "$ASSETS_DIR" && find . -type f \( -name '*.blend' -o -name '*.ply' \) | sed 's#^\./##' | sort )
 } > "$MANIFEST"
 
 echo "Push complete. Manifest refreshed -> commit scripts/assets-manifest.txt"

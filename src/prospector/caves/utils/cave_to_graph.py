@@ -485,11 +485,152 @@ def _augment_edges_with_extra_los(
     return all_edges
 
 
+# Edge-selection tuning for the shortest-biased graph (see _shortest_biased_edges).
+#   EDGE_DISTANCE_QUANTILE : only LoS pairs shorter than this quantile of all LoS
+#       pairwise distances are eligible as (non-MST) edges -> favours short links.
+#   EDGE_TARGET_PER_NODE   : cap on total edges as a multiple of N (incl. the MST).
+EDGE_DISTANCE_QUANTILE = 0.25
+EDGE_TARGET_PER_NODE = 1.5
+
+
+def _shortest_biased_edges(
+    los_mat: np.ndarray,
+    dist_mat: np.ndarray,
+    num_nodes: int,
+    *,
+    quantile: float = EDGE_DISTANCE_QUANTILE,
+    target_per_node: float = EDGE_TARGET_PER_NODE,
+    max_edge_length: Optional[float] = None,
+) -> Tuple[np.ndarray, float]:
+    """
+    Build a sparse, short-edge-biased traversibility graph.
+
+    1. Minimum spanning tree over LoS edges (weighted by Euclidean distance) via
+       Kruskal + union-find. This connects the graph with the shortest total edge
+       length -- chaining short hops rather than a few long ones.
+    2. Augment with additional LoS edges, shortest-first, but ONLY those below the
+       `quantile` of all LoS pairwise distances, up to ceil(target_per_node * N)
+       edges total. Gives local redundancy without reintroducing long links.
+
+    A long edge appears only where the MST genuinely has no shorter way to reach a
+    node (e.g. an isolated pocket).
+
+    max_edge_length : optional
+        If set, NO edge longer than this is ever added. Useful on porous/sparse
+        maps where line-of-sight can leak through wall gaps and produce phantom
+        long-range links. The result may then be a spanning FOREST rather than a
+        tree: any node with no in-range neighbour is left (weakly) disconnected --
+        an honest signal of a coverage gap -- instead of being bridged by a fake
+        long edge.
+
+    Returns
+    -------
+    edges : (M, 2) int array
+    min_adjacent_distance : float
+        Longest edge length in the returned graph (kept for API compatibility).
+    """
+    N = int(num_nodes)
+    if N <= 1:
+        return np.zeros((0, 2), dtype=np.int32), 0.0
+
+    iu, ju = np.triu_indices(N, k=1)
+    mask_los = los_mat[iu, ju]
+    if not np.any(mask_los):
+        raise RuntimeError(
+            "No candidate edges with line-of-sight exist between any node pairs; "
+            "this should not happen if nodes were sampled with LOS-connectivity."
+        )
+
+    ei = iu[mask_los]
+    ej = ju[mask_los]
+    ed = dist_mat[iu, ju][mask_los]
+
+    # Optional hard cap on edge length (drop phantom long-range LoS on porous maps).
+    if max_edge_length is not None:
+        keep = ed <= float(max_edge_length)
+        ei, ej, ed = ei[keep], ej[keep], ed[keep]
+        if ed.size == 0:
+            raise RuntimeError(
+                f"No line-of-sight edges within max_edge_length={max_edge_length}."
+            )
+
+    # Sort candidate LoS edges by ascending distance (short edges first).
+    order = np.argsort(ed, kind="stable")
+    ei, ej, ed = ei[order], ej[order], ed[order]
+
+    # --- Kruskal MST over LoS edges --------------------------------------- #
+    parent = list(range(N))
+
+    def find(x: int) -> int:
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:  # path compression
+            parent[x], x = root, parent[x]
+        return root
+
+    selected: List[Tuple[int, int]] = []
+    selected_set = set()
+    n_mst = 0
+    for a, b in zip(ei, ej):
+        a, b = int(a), int(b)
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+            key = (a, b) if a < b else (b, a)
+            selected.append(key)
+            selected_set.add(key)
+            n_mst += 1
+            if n_mst == N - 1:
+                break
+
+    n_components = N - n_mst
+    if n_mst < N - 1:
+        if max_edge_length is None:
+            raise RuntimeError(
+                "Even with all line-of-sight edges, the node graph remains disconnected. "
+                "This should not happen if nodes were sampled with LOS-connectivity."
+            )
+        # With a length cap a forest is expected: some nodes have no in-range
+        # neighbour. Report it rather than fabricating a long bridge.
+        print(
+            f"[cave_to_graph] Length cap {max_edge_length} -> spanning FOREST with "
+            f"{n_components} component(s) ({n_mst} tree edges); "
+            f"{n_components - 1} coverage gap(s) left unbridged."
+        )
+
+    # --- Short-edge augmentation under a distance quantile ----------------- #
+    threshold = float(np.quantile(ed, quantile)) if ed.size else 0.0
+    target = int(np.ceil(target_per_node * N))
+    for a, b, d in zip(ei, ej, ed):
+        if len(selected) >= target:
+            break
+        if d > threshold:
+            break  # ed is ascending: nothing shorter remains
+        key = (int(a), int(b)) if a < b else (int(b), int(a))
+        if key in selected_set:
+            continue
+        selected.append(key)
+        selected_set.add(key)
+
+    edges = np.array(selected, dtype=np.int32)
+    edge_lengths = dist_mat[edges[:, 0], edges[:, 1]]
+    min_adj = float(edge_lengths.max()) if edge_lengths.size else 0.0
+
+    print(
+        f"[cave_to_graph] Shortest-biased edges: {edges.shape[0]} total "
+        f"(MST={n_mst}, quantile={quantile} -> thr={threshold:.3f}, "
+        f"longest edge={min_adj:.3f})."
+    )
+    return edges, min_adj
+
+
 def compute_edges_and_communication_matrix(
     cave_map: CaveMapType,
     node_positions: np.ndarray,
     *,
     rng: Optional[np.random.Generator] = None,
+    max_edge_length: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Compute adjacency edges and communication matrix for the given node positions.
@@ -529,20 +670,14 @@ def compute_edges_and_communication_matrix(
     A[los_mat] = 1
     np.fill_diagonal(A, 1)
 
-    # Adjacency edges: smallest threshold for which the line-of-sight graph is connected.
-    min_adj_dist, edges_base = _compute_min_adjacent_distance(los_mat, dist_mat)
-
-    # Final augmentation step for denser local connectivity (still LOS-respecting).
-    edges_final = _augment_edges_with_extra_los(
-        los_mat,
-        edges_base,
-        num_nodes=N,
-        rng=rng,
+    # Adjacency edges: shortest-biased graph (MST backbone + short-quantile extras).
+    # Favours chaining short hops over a few long edges; see _shortest_biased_edges.
+    edges_final, min_adj_dist = _shortest_biased_edges(
+        los_mat, dist_mat, N, max_edge_length=max_edge_length
     )
 
     print(
-        f"[cave_to_graph] Final edges: {edges_final.shape[0]} "
-        f"(base={edges_base.shape[0]}, nodes={N})."
+        f"[cave_to_graph] Final edges: {edges_final.shape[0]} (nodes={N})."
     )
 
     return edges_final, A, min_adj_dist

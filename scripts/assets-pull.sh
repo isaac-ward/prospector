@@ -34,6 +34,9 @@ for raw in "${NAMES[@]}"; do
   name="$(echo "$raw" | xargs)"   # trim whitespace
   [ -n "$name" ] || continue
   echo "  -> $name"
+  # Manifest entries may include subdirectories (e.g. point_clouds/chamber.ply,
+  # blender/cave-maps.blend), so create the parent directory before downloading.
+  mkdir -p "$(dirname "$ASSETS_DIR/$name")"
   curl -fL -C - --retry 3 --retry-delay 2 -o "$ASSETS_DIR/$name" "$BASE_URL/$name"
 done
 

@@ -5,7 +5,15 @@ files; the big binaries live in a **public Backblaze B2 bucket** and are synced
 with [rclone](https://rclone.org) (push) / `curl` (pull).
 
 This replaced Git LFS, which can't hold files over 2 GB on GitHub (e.g.
-`darpa2.blend` is ~3.2 GB).
+`cave-maps.blend` is ~4.4 GB).
+
+Assets are organised into subdirectories under `src/assets/`:
+
+- `point_clouds/` — `.ply` point clouds (chamber, tunnels, grapevine, combined, …)
+- `blender/` — `.blend` scene files (`cave-maps.blend`, `stanford.blend`)
+
+The manifest records these paths relative to `src/assets/`, and pulls recreate
+the same layout.
 
 ## Fetching assets (no account needed)
 

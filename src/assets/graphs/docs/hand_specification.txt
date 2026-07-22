@@ -1,0 +1,74 @@
+HAND-SPECIFIED CONNECTIVITY FOR THE `combined` CAVE (3D)
+========================================================
+
+Why this file exists
+--------------------
+`combined.ply` joins the DARPA `tunnels` and `chamber` sections with new
+connector tunnels. Two problems make automatic graph generation impossible on
+it:
+  1. The tunnels <-> connector throat is a sub-0.5 m pinch: at 0.1 m voxels the
+     cloud leaks under flood-fill; at 0.5 m the throat seals shut and the
+     tunnels flood as a separate volume. There is no single voxel size at which
+     the whole cave is one watertight interior.
+  2. That throat has NO straight line-of-sight from any tunnels node into the
+     connector, so a straight-LoS traversibility graph can never connect the
+     tunnels to the rest without an edge that passes through rock.
+
+So the `combined` graph is specified BY HAND (below) rather than derived from
+line-of-sight on the map. The result is stored verbatim in:
+    src/assets/graphs/n=40/combined_3d_graph.npz
+    src/assets/graphs/n=35/combined_3d_graph.npz
+and the traversibility edges alone in the matching combined_3d.json.
+`test_cave_graphs_manual.py` reads these npz files for `combined` (it does NOT
+recompute line-of-sight for this cave).
+
+Node sets
+---------
+Base points reuse the curated per-section graphs:
+  - tunnels : nodes from src/assets/graphs/n=15/tunnels_3d.json
+  - chamber : nodes from src/assets/graphs/n=10/chamber_3d.json
+  - new     : 17 hand-placed coverage points (logs/coverage_diagnostic/new_points.npy)
+
+40-node combined = tunnels {1,2,3,4,5,6,7,8,9,10,11,12,15} (13)
+                 + chamber {1,2,3,4,5,6,7,8,9,10}          (10)
+                 + new     {1..17}                          (17)   = 40
+
+35-node combined = 40-node set MINUS tunnels {10,11,12} and chamber {2,3}
+                 = tunnels {1,2,3,4,5,6,7,8,9,15} (10)
+                 + chamber {1,4,5,6,7,8,9,10}     (8)
+                 + new     {1..17}                (17)      = 35
+
+(All indices 1-based, per their source graph / the coverage diagnostic map.)
+
+TRAVERSIBILITY edges
+--------------------
+  - within tunnels : the edges of tunnels_3d (n=15), restricted to kept nodes.
+  - within chamber : the edges of chamber_3d (n=10), restricted to kept nodes.
+  - within new     : ONLY the following 16 pairs (no other new-new pair is
+                     traversible):
+        7-11, 3-16, 11-16, 11-12, 12-6, 6-17, 17-8, 8-14, 14-4,
+        4-13, 13-9, 9-15, 15-2, 2-5, 5-1, 10-1
+  - boundary (cross-region), treated as having line-of-sight regardless of the
+    map, i.e. forced traversible:
+        tunnels 9  <-> new 5
+        tunnels 5  <-> new 13
+        chamber 8  <-> new 7
+        chamber 9  <-> new 3
+
+COMMUNICATION (line-of-sight) matrix A
+--------------------------------------
+  - within tunnels : FULL line-of-sight between kept tunnels nodes, computed on
+                     the original dense tunnels.ply.
+  - within chamber : FULL line-of-sight between kept chamber nodes, computed on
+                     the original dense chamber.ply.
+  - within new     : the same 16 pairs above (forced).
+  - boundary       : the same 4 pairs above (forced).
+  - no other cross-region communication.
+  - A is symmetric with 1s on the diagonal.
+
+npz contents (both n=40 and n=35)
+---------------------------------
+  nodes : (N,3) float   world coordinates, ordered [tunnels..., chamber..., new...]
+  edges : (M,2) int      traversibility edges (undirected, node indices into `nodes`)
+  A     : (N,N) int      communication matrix (1 = line-of-sight / can communicate)
+  comms : (N,N) int      identical to A (kept for compatibility with the manual test)

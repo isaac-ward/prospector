@@ -4,7 +4,8 @@ seed: 44
 simulation:
   # dynamics model to use: dynamics_2d_linear | dynamics_3d_linear | dynamics_3d
   dynamics_model: dynamics_3d_linear
-  # cave to explore: chamber | tunnels | grapevine
+  # cave to explore: chamber | tunnels | combined | grapevine-exped-3
+  # (grapevine-exped-2 is archived; grapevine-exped-3 is the active grapevine survey)
   cave: tunnels
   agents:
     num_agents: 2
@@ -41,7 +42,7 @@ blender:
   # NOTE: set this to your blender install
   # TODO: download from the web if not found?
   blender_executable_path: "C:/Users/moose/Desktop/apps/blender-4.5.4-windows-x64/blender-4.5.4-windows-x64/blender.exe"
-  relative_to_repo_blend_file_path: "src/assets/darpa2.blend"
+  relative_to_repo_blend_file_path: "src/assets/blender/cave-maps.blend"
   # Arguments to the run file
   log_folder_to_process: "run_2026_01_17_17_29_08_test_simulation"
   #log_folder_to_process: "run_2026_01_17_17_29_12_test_simulation"
@@ -108,7 +109,7 @@ caves:
     metadata: 
      - key: DARPA SubT Section Number
        value: 5
-    relative_path: "/src/assets/chamber.ply"
+    relative_path: "/src/assets/point_clouds/chamber.ply"
     known_internal_xyz: [59.301, 105.96, 0.136567]
     slice_for_2d:
       z: -3.1
@@ -137,7 +138,7 @@ caves:
     metadata: 
       - key: DARPA SubT Section Number
         value: 6
-    relative_path: "/src/assets/tunnels.ply"
+    relative_path: "/src/assets/point_clouds/tunnels.ply"
     known_internal_xyz: [29.1537, 39.3087, -2.45432]
     slice_for_2d:
       z: -2.25432
@@ -161,9 +162,38 @@ caves:
         [0, 1, 10, 11, 10, 3, 4, 12, 4, 14, 5, 6, 2, 0]
       ]
 
-  grapevine:
+  # 'combined' is the chamber + tunnels sections joined by new connector tunnels
+  # (authored in cave-maps.blend, exported as combined.ply). Unlike the old
+  # composite, this is a SINGLE physically-connected navigable volume: one flood
+  # fill spans both sections, and line-of-sight / traversibility route through the
+  # connectors -- so it is treated as a normal single-ply cave.
+  combined:
+    source: DARPA SubT Challenge Final Event (sections 5 + 6, joined)
+    relative_path: "/src/assets/point_clouds/combined.ply"
+    # Interior seed shared with chamber (inside the joined volume, free voxel).
+    known_internal_xyz: [59.301, 105.96, 0.136567]
+    slice_for_2d:
+      z: -3.1
+      thickness: 0.1
+    voxel_size: 0.1
+    plotting:
+      obstacle_points:
+        max_num: 30000
+        alpha: 0.1
+    # Relates graph waypoints to world coordinates (any generated size works).
+    graph_waypoints_file: "src/assets/graphs/n=20/combined_3d.json"
+
+  # The grapevine cave has been surveyed on multiple expeditions. Each survey is
+  # kept as its own cave entry so the history is preserved. ALWAYS use the latest
+  # (grapevine-exped-3); grapevine-exped-2 is archived for reference.
+
+  # --- Archived: first survey (do not delete) --------------------------- #
+  grapevine-exped-2:
     source: Stanford Expedition
-    metadata: 
+    status: archived   # superseded by grapevine-exped-3; kept for history
+    metadata:
+      - key: Expedition number
+        value: 2
       - key: Expedition date
         value: 24 May 2025
       - key: Survey team
@@ -171,7 +201,38 @@ caves:
           - Isaac R. Ward
           - Michelle Ho
           - Maximilian Adang
-    relative_path: "/src/assets/grapevine.ply"
+    # The original 30.4M-point ASCII cloud (892 MB), too heavy to voxelize on
+    # modest machines -- this is why exped-3 (a light mesh) is used instead.
+    relative_path: "/src/assets/point_clouds/grapevine-exped-2.ply"
+    known_internal_xyz: [-0.672833, 0.089741, 1.85611]
+    slice_for_2d:
+      z: 1.94226
+      thickness: 0.01
+    voxel_size: 0.2
+    plotting:
+      obstacle_points:
+        max_num: 20000
+        alpha: 0.1
+
+  # --- Active: latest survey (always use this one) ---------------------- #
+  grapevine-exped-3:
+    source: Stanford Expedition
+    status: active
+    metadata:
+      - key: Expedition number
+        value: 3
+      - key: Expedition date
+        value: 7 February 2026
+      - key: Survey team
+        value:
+          - Isaac R. Ward
+          - Maximilian Adang
+          - Mahdi Al-Husseini
+          - Vikas Patel
+          - Mark Leone
+    # Light expedition mesh (800K verts, 30 MB). Same coordinate frame as
+    # exped-2, so known_internal_xyz / slice_z carry over.
+    relative_path: "/src/assets/point_clouds/grapevine-exped-3.ply"
     known_internal_xyz: [-0.672833, 0.089741, 1.85611]
     slice_for_2d:
       z: 1.94226

@@ -8,10 +8,18 @@ logs/
 saved/
 git-filter-repo.py
 
-# Large 3D assets — stored on external backend (Google Drive) via rclone,
-# NOT in git. Sync with scripts/assets-pull.ps1 / scripts/assets-push.ps1
+# Large 3D assets (.ply / .blend) — organised under src/assets/point_clouds/ and
+# src/assets/blender/, stored on an external cloud bucket via rclone, NOT in git.
+# Sync with scripts/assets-pull.sh / scripts/assets-push.sh.
+# Patterns cover both subdirectories (**/) and anything left directly in assets/,
+# while keeping graphs/ (json + doc png), textures/ and helper scripts tracked.
+src/assets/**/*.blend
+src/assets/**/*.blend1
+src/assets/**/*.blend@
+src/assets/**/*.ply
 src/assets/*.blend
 src/assets/*.blend1
+src/assets/*.blend@
 src/assets/*.ply
 
 
