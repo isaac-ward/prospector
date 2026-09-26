@@ -2,7 +2,6 @@
 # Used by assets-pull.sh to know what to download. Auto-refreshed by assets-push.sh
 # (commit this file after a push so teammates pull the right set).
 blender/cave-maps.blend
-blender/stanford.blend
 point_clouds/chamber.ply
 point_clouds/combined.ply
 point_clouds/grapevine-exped-2.ply

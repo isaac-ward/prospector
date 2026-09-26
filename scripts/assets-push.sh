@@ -46,7 +46,9 @@ rclone copy "$ASSETS_DIR" ":b2:$BUCKET" --filter-from "$FILTER" --progress --tra
   echo "# Assets stored in the external B2 bucket, one path per line (relative to src/assets)."
   echo "# Used by assets-pull.sh to know what to download. Auto-refreshed by assets-push.sh"
   echo "# (commit this file after a push so teammates pull the right set)."
-  ( cd "$ASSETS_DIR" && find . -type f \( -name '*.blend' -o -name '*.ply' \) | sed 's#^\./##' | sort )
+  # Paths excluded in assets-filter.txt (e.g. blender/stanford.blend) are local-only.
+  ( cd "$ASSETS_DIR" && find . -type f \( -name '*.blend' -o -name '*.ply' \) | sed 's#^\./##' \
+      | grep -vxF -f <(sed -n 's#^- ##p' "$FILTER" | grep -v '\*') | sort )
 } > "$MANIFEST"
 
 echo "Push complete. Manifest refreshed -> commit scripts/assets-manifest.txt"

@@ -3,6 +3,10 @@
 # (assets live in point_clouds/ and blender/ subdirectories).
 # .blend1 autosave backups and .blend@ save-temps are excluded (they do not end
 # in exactly .blend/.ply) to save space.
+# Local-only (never pushed): stanford.blend (raw Grapevine source scene),
+# darpa2.blend (old DARPA scene, pulled down from the bucket for safekeeping).
+- blender/stanford.blend
+- blender/darpa2.blend
 + **.blend
 + **.ply
 - *

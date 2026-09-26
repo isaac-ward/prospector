@@ -10,7 +10,10 @@ This replaced Git LFS, which can't hold files over 2 GB on GitHub (e.g.
 Assets are organised into subdirectories under `src/assets/`:
 
 - `point_clouds/` — `.ply` point clouds (chamber, tunnels, grapevine, combined, …)
-- `blender/` — `.blend` scene files (`cave-maps.blend`, `stanford.blend`)
+- `blender/` — `.blend` scene files (`cave-maps.blend`). `stanford.blend` (raw
+  Grapevine scans, source of `grapevine-exped-2.ply`) is local-only: it is
+  excluded in `assets-filter.txt` and never pushed. Same for `darpa2.blend`
+  (older DARPA scene, kept locally for reference).
 
 The manifest records these paths relative to `src/assets/`, and pulls recreate
 the same layout.
