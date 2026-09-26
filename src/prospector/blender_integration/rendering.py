@@ -83,6 +83,36 @@ def _find_object(name: str) -> bpy.types.Object:
     return obj
 
 
+def _find_cave_object(cave_name: str, kind: str, *, required: bool = True) -> Optional[bpy.types.Object]:
+    """
+    Cave scene object by role, accepting both naming styles used in the
+    .blend files: '<cave>_open_top' / '<cave>-open-top', etc. For 'enclosed'
+    the bare '<cave>' mesh is also accepted.
+    """
+    candidates = [f"{cave_name}_{kind}", f"{cave_name}-{kind.replace('_', '-')}"]
+    if kind == "enclosed":
+        candidates.append(cave_name)
+    # Also Blender duplicates of those names ('<name>.001', ...). When several
+    # exist, the one the .blend has render-visible is the one meant to be used
+    # (e.g. grapevine-exped-3-open-top.001 in cave-maps.blend).
+    found = []
+    for base in candidates:
+        found += [o for o in bpy.data.objects if o.name == base]
+        found += sorted(
+            (o for o in bpy.data.objects
+             if o.name.startswith(base + ".") and o.name[len(base) + 1:].isdigit()),
+            key=lambda o: o.name,
+        )
+    for obj in found:
+        if not obj.hide_render:
+            return obj
+    if found:
+        return found[0]
+    if required:
+        raise KeyError(f"No '{kind}' object for cave '{cave_name}' (tried {candidates})")
+    return None
+
+
 def _find_camera(name: str) -> bpy.types.Object:
     obj = _find_object(name)
     if obj.type != "CAMERA":
@@ -101,9 +131,11 @@ def _frame_path(out_dir: Path, frame: int) -> Path:
     return out_dir / f"{frame:0{FRAME_FILENAME_DIGITS}d}{IMAGE_EXT}"
 
 
-def _iter_frames(scene: bpy.types.Scene, *, first_n: Optional[int]) -> List[int]:
+def _iter_frames(scene: bpy.types.Scene, *, first_n: Optional[int], last_only: bool = False) -> List[int]:
     start = int(scene.frame_start)
     end = int(scene.frame_end)
+    if last_only:
+        return [end]
     frames = list(range(start, end + 1))
     if first_n is not None:
         frames = frames[: int(first_n)]
@@ -141,6 +173,16 @@ def infer_cave_name_from_scene(log_folder_path) -> str:
     # if score < 1:
     #     raise RuntimeError("infer_cave_name_from_scene found no valid cave candidates")
     # return cave_name
+
+    # Benchmark trial folders (benchmarks/benchmark_tours.py) record the cave
+    # in result.json
+    result = Path(log_folder_path) / "result.json"
+    if result.is_file():
+        import json
+
+        cave = json.loads(result.read_text()).get("cave")
+        if cave:
+            return str(cave)
 
     # Alternative: infer from log folder
     for p in log_folder_path.iterdir():
@@ -204,6 +246,7 @@ def render_frames_from_camera(
     out_dir: Path,
     first_n_frames: Optional[int] = DEFAULT_RENDER_FIRST_N_FRAMES,
     skip_existing_renders: bool = True,
+    last_frame_only: bool = False,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -212,7 +255,7 @@ def render_frames_from_camera(
     # Use this camera
     scene.camera = camera_obj
 
-    frames = _iter_frames(scene, first_n=first_n_frames)
+    frames = _iter_frames(scene, first_n=first_n_frames, last_only=last_frame_only)
     if not frames:
         return
 
@@ -245,8 +288,13 @@ def render_all_views(
     cave_name: Optional[str] = None,
     first_n_frames: Optional[int] = None,
     skip_existing_renders: bool = True,
+    views: Optional[List[str]] = None,
+    last_frame_only: bool = False,
 ) -> None:
     """
+    views: subset of {'overhead', 'pov', 'top_down'} (None = all).
+    last_frame_only: render only the final frame (e.g. completed-path figures).
+
     Renders:
       - overhead: camera named 'camera_<cave_name>_angled_overhead'
       - agent_{i}_pov: camera named 'camera_agent_{i}_pov'
@@ -256,6 +304,7 @@ def render_all_views(
       <log_folder>/blender_renders/<view_name>/
     """
     scene = bpy.context.scene
+    want = lambda v: views is None or v in views
 
     if cave_name is None:
         cave_name = infer_cave_name_from_scene(log_folder_path)
@@ -264,9 +313,11 @@ def render_all_views(
     renders_root.mkdir(parents=True, exist_ok=True)
 
     # Environment objects per your rules
-    obj_enclosed = _find_object(f"{cave_name}_enclosed")
-    obj_bbox = _find_object(f"{cave_name}_bounding_box")
-    obj_open_top = _find_object(f"{cave_name}_open_top")
+    # Only require what the requested views use (overhead / top-down: open-top
+    # mesh; POV: enclosed mesh, plus the bounding box if the scene has one)
+    obj_open_top = _find_cave_object(cave_name, "open_top", required=want("overhead") or want("top_down"))
+    obj_enclosed = _find_cave_object(cave_name, "enclosed", required=want("pov"))
+    obj_bbox = _find_cave_object(cave_name, "bounding_box", required=False)
 
     # Find stuff
     quad_names: List[str] = []
@@ -297,15 +348,20 @@ def render_all_views(
         ]
     )
     try:
-        render_frames_from_camera(
-            scene=scene,
-            camera_obj=overhead_cam,
-            out_dir=renders_root / "overhead",
-            first_n_frames=first_n_frames,
-            skip_existing_renders=skip_existing_renders,
-        )
+        if want("overhead"):
+            render_frames_from_camera(
+                scene=scene,
+                camera_obj=overhead_cam,
+                out_dir=renders_root / "overhead",
+                first_n_frames=first_n_frames,
+                skip_existing_renders=skip_existing_renders,
+                last_frame_only=last_frame_only,
+            )
     finally:
         restore_visibility(snap)
+
+    if not (want("pov") or want("top_down")):
+        return
 
     # -------------------------
     # 2) Agent POV + top-down
@@ -340,13 +396,13 @@ def render_all_views(
 
     for aid in agent_ids:
         # ---- POV (full mesh + bbox)
-        if aid in pov_by_id:
+        if aid in pov_by_id and want("pov"):
             cam = pov_by_id[aid]
             snap = set_only_these_objects_render_visible(
                 render_visible_names=[
                     cam.name,
                     obj_enclosed.name,
-                    obj_bbox.name,
+                    *([obj_bbox.name] if obj_bbox is not None else []),
                     # agents/curves visibility
                     *quad_names,
                     #*curve_names,
@@ -362,12 +418,13 @@ def render_all_views(
                     out_dir=renders_root / f"agent_{aid}_pov",
                     first_n_frames=first_n_frames,
                     skip_existing_renders=skip_existing_renders,
+                    last_frame_only=last_frame_only,
                 )
             finally:
                 restore_visibility(snap)
 
         # ---- Local overhead (half mesh)
-        if aid in top_by_id:
+        if aid in top_by_id and want("top_down"):
             cam = top_by_id[aid]
             snap = set_only_these_objects_render_visible(
                 render_visible_names=[
@@ -389,6 +446,7 @@ def render_all_views(
                     out_dir=renders_root / f"agent_{aid}_top_down",
                     first_n_frames=first_n_frames,
                     skip_existing_renders=skip_existing_renders,
+                    last_frame_only=last_frame_only,
                 )
             finally:
                 restore_visibility(snap)

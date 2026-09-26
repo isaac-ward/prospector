@@ -3,7 +3,7 @@ seed: 44
 # How to drive the main simulation?
 simulation:
   # dynamics model to use: dynamics_2d_linear | dynamics_3d_linear | dynamics_3d
-  dynamics_model: dynamics_3d_linear
+  dynamics_model: dynamics_3d
   # cave to explore: chamber | tunnels | combined | grapevine-exped-3
   # (grapevine-exped-2 is archived; grapevine-exped-3 is the active grapevine survey)
   cave: tunnels
@@ -19,10 +19,15 @@ simulation:
     # Making this < 1 will speed up rendering at the cost of 
     # quality/layout niceness
     figure_size_multiplier: 1.0
-    # For dt's of 0.25 I recommend fps of 25,
-    # for dt's of 0.1 I recommend fps of 50-60
-    fps: 60
+    # If true, the video plays in real time at `fps`, interpolating frames
+    # between control steps (fps * dt must be an integer); else one frame per
+    # step at `fps`
+    realtime: true
+    fps: 30
   post_processing:
+    # EXAMPLE VALUE -- set to your own run: the log folder (under logs/ or
+    # saved/, or an absolute path) whose blender_renders/ should be turned into
+    # videos by test_blender_outputs_to_video
     render_blender_outputs_folder: "run_2026_01_17_17_29_12_test_simulation"
   # How many waypoints to task each agent with reaching?
   num_waypoints: 8
@@ -32,20 +37,68 @@ simulation:
   # below
   use_provided_graph_waypoints: true 
 
-  # After reaching all waypoints, how many steps to continue simulating
-  num_steps_to_simulate_after_completion: 50
+  # After reaching all waypoints, how many seconds to continue simulating
+  seconds_to_simulate_after_completion: 2.0
+
+# ----------------------------------------------------------------
+# Benchmarking high-level tours with the low-level controller
+# (python -m prospector.benchmarks.benchmark_tours)
+# ----------------------------------------------------------------
+benchmark:
+  # Step-aligned multi-agent tours over graph nodes (0-based node indices)
+  # (see src/assets/tours/example_tours.json for the format)
+  tours_file: "src/assets/tours/example_tours.json"
+  # Which tour instances to run (keys of `instances` below)
+  # The example tours file only has tunnel_3d_025; add others for your own tours
+  run_instances: [tunnel_3d_025]
+  instances:
+    tunnel_3d_025:
+      cave: tunnels
+      graph_file: "src/assets/graphs/n=25/tunnels_3d.json"
+    chamber_3d_025:
+      cave: chamber
+      graph_file: "src/assets/graphs/n=25/chamber_3d.json"
+    grapevine_3d_025:
+      cave: grapevine-exped-3
+      graph_file: "src/assets/graphs/n=25/grapevine-exped-3_3d.json"
+  num_trials: 10
+  # Parallel worker processes (1 = sequential)
+  num_workers: 6
+  # If true, at every tour step flagged 'contact' both agents hold at their
+  # node until all agents have arrived AND have line of sight, then continue.
+  wait_for_comms: true
+  # Hard cap on simulation steps per trial
+  max_steps: 8000
+  # After success, keep simulating this long (agents hold at their final
+  # nodes) so videos / Blender renders don't cut off mid-arrival. Metrics are
+  # taken at the completion step.
+  hold_after_completion_s: 2.0
+  # Fail if any agent waits at a rendezvous longer than this many steps
+  rendezvous_timeout_steps: 3000
+  # Fail if no agent reaches a new waypoint for this many steps
+  stall_timeout_steps: 1000
+  # Which trial indices (per instance) record a matplotlib video
+  video_trials: [0]
+  render_every_n_steps: 1
+  # Videos play in real time at this fps; frames between control steps are
+  # interpolated (video_fps * dt * render_every_n_steps must be an integer)
+  video_fps: 30
+  # Overlay graph nodes (with index labels) and edges in rendered frames
+  render_graph: false
 
 # ----------------------------------------------------------------
 # Settings for using background blender
 # ----------------------------------------------------------------
 blender:
-  # NOTE: set this to your blender install
-  # TODO: download from the web if not found?
-  blender_executable_path: "C:/Users/moose/Desktop/apps/blender-4.5.4-windows-x64/blender-4.5.4-windows-x64/blender.exe"
+  # Blender executable: a full path, or a name found on PATH. Use Blender 5.0+:
+  # cave-maps.blend was saved with 5.0 (older versions load it very slowly and
+  # can evaluate the cut-away cave meshes wrongly).
+  blender_executable_path: "blender"
   relative_to_repo_blend_file_path: "src/assets/blender/cave-maps.blend"
-  # Arguments to the run file
+  # EXAMPLE VALUE -- set to your own run: the log folder to render (relative to
+  # logs/ or saved/, or an absolute path), e.g. a benchmark trial folder like
+  # run_<timestamp>_benchmark_tours/tunnel_3d_025/trial_00
   log_folder_to_process: "run_2026_01_17_17_29_08_test_simulation"
-  #log_folder_to_process: "run_2026_01_17_17_29_12_test_simulation"
   # Must be true to actually render headlessly
   render: true
   # If set to a number, will only render this many frames from the start, 
@@ -53,6 +106,14 @@ blender:
   render_first_n_frames: null
   # If true, will skip rendering frames that already have images rendered
   skip_existing_renders: false
+  # Cameras to render: any of [overhead, pov, top_down]; null = all
+  views: null
+  # If true, render only the final frame (e.g. the completed-path figure)
+  render_last_frame_only: false
+  # Real-time playback: each sim step spans video_fps * dt frames (must be an
+  # integer, e.g. 10/20/30/60 at dt = 0.1), with Blender interpolating between
+  # keyframes. Render cost scales with it. null = one frame per sim step.
+  video_fps: 30
 
 # ----------------------------------------------------------------
 # Relating to the environment / simulation settings
@@ -80,16 +141,41 @@ rewards:
 policies:
 
   policy_mppi:
-    num_samples: 2048 # 32 is all you need for linear dynamics
-    horizon: 20 # 10 is all you need for linear dynamics
+    # Base settings, overridden per dynamics model below. Shared by
+    # test_simulation and the tour benchmark (agents/policies/mppi_factory.py).
+    num_samples: 256
+    horizon: 20
     # Lambda range is (0, inf)
     # If lambda is small, this approaches picking the max-reward action
     # If lambda is large, this approaches uniform weighting
-    lambda_: 0.05 # 1.0 works for linear dynamics
-    # Higher noise std means more exploration when selecting
-    # actions based on the previous best action
-    noise_std: 1 # 0.05 works for linear dynamics
-    sampling_mode: "uniform"  # uniform | gaussian
+    lambda_: 0.2
+    noise_std: 0.5
+    sampling_mode: "gaussian"  # uniform | gaussian
+    # If the executed (sample-averaged) plan's rollout collides, execute the
+    # best sample instead
+    safe_fallback: true
+    # Optional soft safety margin in the cost: planned states within
+    # margin_radius of rock (but outside agents.agent_radius, the crash check)
+    # pay margin_penalty, except within margin_exempt_radius of the target.
+    # Off: the fallback alone avoids collisions, and on coarse maps (grapevine,
+    # 0.2 m voxels) a 0.15 m margin stalls agents in narrow shafts.
+    margin_radius: null
+    margin_penalty: 1000.0
+    margin_exempt_radius: 1.0
+    per_dynamics:
+      # Full 12D model in velocity mode: standard warm-started MPPI
+      dynamics_3d:
+        warm_start: true
+        noise_smoothing: 0.5
+        include_nominal_sample: true
+        reward_normalization: "median"
+      # Simple kinematic model (not used for results)
+      dynamics_3d_linear:
+        num_samples: 32
+        horizon: 10
+        lambda_: 1.0
+        noise_std: 0.05
+        sampling_mode: "uniform"
 
 # ----------------------------------------------------------------
 # Relating to agents
@@ -279,30 +365,46 @@ dynamics:
     position_dimensions: [0, 1, 2]
 
   dynamics_3d:
+    # Full 12D rigid-body quadrotor (RK4 sub-stepped). In the controller modes
+    # the policy commands a setpoint and a cascaded controller inside the
+    # dynamics computes rotor speeds every sub-step.
     dt: 0.1
-    # State is
-    # [x, y, z, 
-    # vx, vy, vz, 
-    # roll, pitch, yaw, 
-    # p, q, r]
+    control_mode: velocity          # rotor_speeds | attitude | velocity
+    integrator: rk4
+    substeps: 10                    # 100 Hz inner loop
+    # State: [x, y, z, yaw, pitch, roll, vx, vy, vz, p, q, r]
     state_dim: 12
-    state_limits:
-      - [null, null]
-      - [null, null]
-      - [null, null]
-      - [null, null]
-      - [null, null]
-      - [null, null]
-      - [null, null]
-      - [null, null]
-    # Action is [w_rotor_1, w_rotor_2, w_rotor_3, w_rotor_4]
+    state_limits: [[null, null], [null, null], [null, null], [null, null], [null, null], [null, null],
+                   [null, null], [null, null], [null, null], [null, null], [null, null], [null, null]]
+    # Action (velocity mode): [vx, vy, vz (m/s, world), yaw_rate (rad/s)]
     action_dim: 4
-    # Typical multirotor rotor speeds are on the order of hundreds to ~1,200 rad/s
     action_limits:
-    # 2 is too high, as is 3
-    # 1.5 is a ground crash
-      - [0.0, 1.75]
-      - [0.0, 1.75]
-      - [0.0, 1.75]
-      - [0.0, 1.75]
+      - [-2.0, 2.0]
+      - [-2.0, 2.0]
+      - [-1.0, 1.0]
+      - [-0.5, 0.5]
+    # attitude mode instead: [[-4,4],[-0.5,0.5],[-0.5,0.5],[-0.5,0.5]]
+    # rotor_speeds mode instead: [[100,1500]] x4 (rad/s)
     position_dimensions: [0, 1, 2]
+    # ~1 kg quad, 0.25 m motor-to-motor, thrust-to-weight 2 (see dynamics_3d.py)
+    physical_parameters:
+      mass: 1.0
+      diameter: 0.25
+      Ix: 3.2e-3
+      Iy: 3.2e-3
+      Iz: 5.5e-3
+      g: 9.81
+      thrust_coef: 2.18e-6
+      drag_yaw_coef: 4.4e-8
+      drag_force_coef: 0.3
+      rotor_speed_min: 100.0
+      rotor_speed_max: 1500.0
+    controller_parameters:
+      k_rate_rp: 40.0
+      k_rate_yaw: 10.0
+      k_att: 10.0
+      k_vel_xy: 2.5
+      k_vel_z: 3.0
+      max_tilt_deg: 35.0
+      max_accel_up: 5.0
+      max_accel_down: 5.0

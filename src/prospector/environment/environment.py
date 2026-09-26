@@ -15,10 +15,30 @@ from ..caves.cave_map_2d import CaveMap2D
 from ..caves.cave_map_3d import CaveMap3D
 from ..utils.plotting_orchestrator import PlottingOrchestrator
 from ..tasks.task_waypoint_following import TaskWaypointFollowing
+from ..tasks.comms_rendezvous import CommsRendezvous
 from ..utils.json_utils import dump_json
 
 
 AliveFn = Callable[[jnp.ndarray], bool]
+
+
+class _InterpolatedHistory:
+    """
+    MultiAgent stand-in for rendering an in-between frame: each agent's
+    history with its latest state replaced by the interpolated one, so the
+    drawn trajectory tail ends exactly at the drawn agent position.
+    """
+
+    def __init__(self, agents: MultiAgent, frame_state: np.ndarray) -> None:
+        self._agents = agents
+        self._frame_state = frame_state
+        self.num_agents = agents.num_agents
+
+    def get_full_history_for_agent(self, agent_idx: int):
+        states, actions = self._agents.get_full_history_for_agent(agent_idx)
+        states = np.asarray(states).copy()
+        states[-1] = self._frame_state[agent_idx]
+        return states, actions
 
 
 class ProspectorEnvironment:
@@ -50,6 +70,11 @@ class ProspectorEnvironment:
         cave_name: Optional[str] = None,
         agent_colors: Optional[np.ndarray] = None,
         tasks: Optional[Sequence[TaskWaypointFollowing]] = None,
+        rendezvous: Optional[CommsRendezvous] = None,
+        render_every_n_steps: int = 1,
+        render_frames_per_step: int = 1,
+        render_graph_nodes: Optional[np.ndarray] = None,
+        render_graph_edges: Optional[np.ndarray] = None,
     ) -> None:
         """
         Parameters
@@ -78,6 +103,14 @@ class ProspectorEnvironment:
             One task object per agent, used for reward computation and
             waypoint progression. If provided, len(tasks) must equal
             num_agents.
+        rendezvous    : CommsRendezvous, optional
+            If provided, agents hold at rendezvous waypoints until all agents
+            have arrived and have line-of-sight comms (requires tasks).
+        render_every_n_steps : int
+            Only render every n-th step (1 = every step).
+        render_frames_per_step : int
+            Frames drawn per rendered step, interpolating agent positions in
+            between (e.g. 3 at dt = 0.1 s gives smooth real-time 30 fps video).
         """
         self._dynamics = dynamics
         self._cave_map = cave_map
@@ -123,10 +156,23 @@ class ProspectorEnvironment:
             self._state_history = []
             self._action_history = []
 
+        if rendezvous is not None and self._tasks is None:
+            raise ValueError("rendezvous requires tasks.")
+        self._rendezvous = rendezvous
+
+        # Exports write here regardless of whether rendering is enabled.
+        self.log_dir: Optional[Path] = Path(log_dir) if log_dir is not None else None
+
         # ------------------------------------------------------------------ #
         # Optional rendering setup                                           #
         # ------------------------------------------------------------------ #
         self._render = bool(render)
+        self._render_every_n_steps = max(1, int(render_every_n_steps))
+        self._render_frames_per_step = max(1, int(render_frames_per_step))
+        self._render_frame_counter = 0
+        self._prev_render_state = np.asarray(self._state)
+        self._render_graph_nodes = render_graph_nodes
+        self._render_graph_edges = render_graph_edges
         self._orch: Optional[PlottingOrchestrator] = None
         self._agent_colors: Optional[np.ndarray] = None
         self._cave_name: Optional[str] = cave_name
@@ -202,6 +248,7 @@ class ProspectorEnvironment:
         self._agents.reset(self._state)
         self._step_index = 0
         self._alive = jnp.ones((self._agents.num_agents,), dtype=bool)
+        self._prev_render_state = np.asarray(self._state)
 
         # Reset env-side histories if we have tasks
         if self._tasks is not None:
@@ -311,22 +358,21 @@ class ProspectorEnvironment:
                     )
                     continue
 
-                # Full history for agent i
-                history_states = jnp.stack(self._state_history[i], axis=0)
+                # Full history for agent i (numpy: this grows every step, and
+                # jnp would recompile for every new length)
+                history_states = np.stack(self._state_history[i], axis=0)
                 if self._action_history[i]:
-                    history_actions = jnp.stack(self._action_history[i], axis=0)
+                    history_actions = np.stack(self._action_history[i], axis=0)
                 else:
-                    history_actions = jnp.zeros(
-                        (0, actions.shape[1]), dtype=jnp.float32
-                    )
+                    history_actions = np.zeros((0, actions.shape[1]), dtype=np.float32)
 
                 # Update waypoint index from current state
                 task_i.update_subtask_from_state(next_state[i])
 
-                # Reward for active waypoint
-                r_i = task_i.reward_for_active_subtask(
-                    history_states, history_actions
-                )
+                # Reward for active waypoint (vectorized, same definition)
+                r_i = task_i.batch_reward_for_active_subtask(
+                    history_states[None], history_actions[None]
+                )[0]
                 reward = reward.at[i].set(jnp.asarray(r_i, dtype=jnp.float32))
                 current_subtasks.append(task_i.current_subtask_idx)
 
@@ -376,27 +422,63 @@ class ProspectorEnvironment:
             info["current_subtask_idx"] = current_subtasks
             info["current_waypoints"] = waypoint_positions
 
+        # 7b) Comms rendezvous: release held agents once all have arrived and
+        # can actually communicate.
+        if self._rendezvous is not None:
+            info.update(self._rendezvous.update(comms_matrix, self._step_index))
+
         # 8) Optional rendering
-        if self._render and self._orch is not None and self._agent_colors is not None:
-            agent_positions = np.asarray(
-                [self._state[i, self.position_dims].tolist() for i in range(num_agents)]
-            )
+        if (
+            self._render
+            and self._orch is not None
+            and self._agent_colors is not None
+            and (self._step_index - 1) % self._render_every_n_steps == 0
+        ):
+            current_state = np.asarray(self._state)
             alive_mask = np.asarray(self._alive)
 
-            # frame_idx should match the external "t" used previously (0-based).
-            frame_idx = self._step_index - 1
+            # Status line: per-agent waypoint progress, comms waits
+            agent_status = []
+            if self._tasks is not None:
+                waiting = info.get("rendezvous_waiting", [False] * num_agents)
+                for i, task_i in enumerate(self._tasks):
+                    s = f"agent {i}: wp {min(task_i.current_subtask_idx, task_i.num_subtasks)}/{task_i.num_subtasks}"
+                    if waiting[i]:
+                        s += " WAITING FOR COMMS"
+                    if not bool(self._alive[i]):
+                        s += " CRASHED"
+                    agent_status.append(s)
 
-            self._orch.render_frame(
-                frame_idx=frame_idx,
-                agent_positions=agent_positions,
-                agent_colors=self._agent_colors,
-                agent_alives=alive_mask,
-                agent_communications_matrix=comms_matrix,
-                waypoint_positions=waypoint_positions,
-                full_agent_data=self._agents,
-                render_trajectories=True,
-                render_highlighted_communications_in_trajectories=True,
-            )
+            # Draw `render_frames_per_step` frames per rendered step, linearly
+            # interpolating the agents between the previous rendered state and
+            # this one (smooth video at a higher fps than the control rate;
+            # the simulation itself is unaffected).
+            k = self._render_frames_per_step
+            span = self._render_every_n_steps * self._dynamics.dt
+            prev_state = self._prev_render_state
+            for j in range(k):
+                alpha = (j + 1) / k
+                frame_state = prev_state + alpha * (current_state - prev_state)
+                t = (self._step_index - self._render_every_n_steps) * self._dynamics.dt + alpha * span
+                self._orch.render_frame(
+                    graph_nodes=self._render_graph_nodes,
+                    graph_edges=self._render_graph_edges,
+                    title_suffix=" | ".join([f"t={t:.1f}s"] + agent_status),
+                    # Consecutive frame indices so the video encoder sees no gaps.
+                    frame_idx=self._render_frame_counter,
+                    agent_positions=frame_state[:, list(self.position_dims)],
+                    agent_colors=self._agent_colors,
+                    agent_alives=alive_mask,
+                    agent_communications_matrix=comms_matrix,
+                    waypoint_positions=waypoint_positions,
+                    full_agent_data=(
+                        _InterpolatedHistory(self._agents, frame_state) if k > 1 else self._agents
+                    ),
+                    render_trajectories=True,
+                    render_highlighted_communications_in_trajectories=True,
+                )
+                self._render_frame_counter += 1
+            self._prev_render_state = current_state
 
         return self._state, reward, done, info
 
@@ -446,13 +528,13 @@ class ProspectorEnvironment:
 
             # Are we saving to numpy?
             if save_as_numpy:
-                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}.npz"
+                filepath = self.log_dir / "trajectories" / f"agent_{i}.npz"
                 filepath.parent.mkdir(parents=True, exist_ok=True)
                 np.savez_compressed(filepath, states=states, actions=actions)
             
             # Are we saving as JSON?
             if save_as_json:
-                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}.json"
+                filepath = self.log_dir / "trajectories" / f"agent_{i}.json"
                 filepath.parent.mkdir(parents=True, exist_ok=True)
                 traj_dict = {
                     "states": states.tolist(),
@@ -464,13 +546,13 @@ class ProspectorEnvironment:
             # Are we saving as CSV?
             if save_as_csv:
                 # Use numpy's csv functionality
-                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}_states.csv"
+                filepath = self.log_dir / "trajectories" / f"agent_{i}_states.csv"
                 filepath.parent.mkdir(parents=True, exist_ok=True)
                 np.savetxt(filepath, states, delimiter=",")
-                filepath = self._orch.log_dir / "trajectories" / f"agent_{i}_actions.csv"
+                filepath = self.log_dir / "trajectories" / f"agent_{i}_actions.csv"
                 np.savetxt(filepath, actions, delimiter=",")
         
-        return self._orch.log_dir / "trajectories"
+        return self.log_dir / "trajectories"
 
     def export_infos(
         self,
@@ -488,7 +570,7 @@ class ProspectorEnvironment:
         -------
         infos_path : Path or None
         """
-        filepath = self._orch.log_dir / "infos.json"
+        filepath = self.log_dir / "infos.json"
         filepath.parent.mkdir(parents=True, exist_ok=True)
         dump_json(filepath, infos, indent=4)
         return filepath

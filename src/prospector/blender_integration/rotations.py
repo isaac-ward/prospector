@@ -7,6 +7,7 @@ import math
 import mathutils
 
 from .constants import EPS_NORM
+from .attitude import quadrotor_attitude_from_positions
 
 
 def _safe_norm3(v: Tuple[float, float, float]) -> float:
@@ -39,7 +40,24 @@ def direction_to_euler_xyz(direction: Tuple[float, float, float]) -> Tuple[float
 
 def compute_rotations_from_positions(
     positions: List[Tuple[float, float, float]],
+    *,
+    dt: float = 0.1,
 ) -> List[Tuple[float, float, float]]:
+    """
+    Quadrotor-style attitude (yaw follows velocity when moving, tilt into
+    acceleration, holds steady when hovering). See attitude.py.
+    """
+    return quadrotor_attitude_from_positions(positions, dt=dt)
+
+
+def compute_rotations_from_positions_legacy(
+    positions: List[Tuple[float, float, float]],
+) -> List[Tuple[float, float, float]]:
+    """
+    Previous behaviour, kept for reference: heading from every per-step
+    displacement (jitters wildly when hovering) with a fixed -15 deg offset on
+    rx, which is roll about +X forward, not pitch.
+    """
     n = len(positions)
     if n == 0:
         return []

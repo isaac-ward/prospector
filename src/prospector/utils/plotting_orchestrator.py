@@ -539,6 +539,7 @@ class PlottingOrchestrator:
         full_agent_data: Optional = None,
         render_trajectories: bool = True,
         render_highlighted_communications_in_trajectories: bool = False,
+        title_suffix: Optional[str] = None,
     ) -> Path:
         """
         Render a single frame.
@@ -1225,7 +1226,10 @@ class PlottingOrchestrator:
                 graph_edges_arr,
             )
 
-        self.fig.suptitle(f"{self.cave_name} – frame {frame_idx:03d}")
+        title = f"{self.cave_name} – frame {frame_idx:03d}"
+        if title_suffix:
+            title += f"\n{title_suffix}"
+        self.fig.suptitle(title)
         self.fig.tight_layout()
 
         frame_path = self.frames_dir / f"{frame_idx:04d}.png"

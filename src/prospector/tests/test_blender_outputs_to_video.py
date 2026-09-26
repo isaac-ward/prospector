@@ -180,7 +180,9 @@ def main(args: DictConfig):
     # Inputs
     # ------------------------------------------------------------------
     folder_name = args.simulation.post_processing.render_blender_outputs_folder
-    fps = int(args.simulation.render.fps)
+    # Must match the fps the frames were keyed for (blender.video_fps) to play
+    # back in real time
+    fps = int(args.blender.get("video_fps", None) or args.simulation.render.fps)
 
     # ------------------------------------------------------------------
     # Resolve paths

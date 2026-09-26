@@ -494,50 +494,44 @@ class CaveMap3D:
         collision : bool
             True if ANY sampled point within radius is not label 0.
         """
-        radius = float(radius)
-        if radius <= 0.0:
-            label = self.query_label(world_coordinate)
-            return label != 0
-
         center = np.asarray(world_coordinate, dtype=np.float64)
         if center.shape[0] != 3:
             raise ValueError(
                 f"world_coordinate must have length 3, got shape {center.shape}"
             )
+        # NOTE: the grid construction below computed offsets as (c + r) - c,
+        # Sample points on a center-independent sphere pattern (see the batched
+        # version). The old per-call grid computed offsets as (c + r) - c, so float
+        # rounding randomly dropped the points at exactly distance r; at
+        # r == voxel_size that left only the center voxel being checked.
+        return bool(self.batch_is_collision_within_radius(center[None, :], radius)[0])
 
-        cx, cy, cz = center
+    def batch_is_collision_within_radius(
+        self,
+        world_coordinates: np.ndarray,
+        radius: float,
+    ) -> np.ndarray:
+        """
+        Vectorized `is_collision_within_radius` over (N, 3) centers.
+
+        Uses the same sphere sample pattern (offsets from the center), so the
+        result matches the single-point version for every center.
+        """
+        centers = np.asarray(world_coordinates, dtype=np.float64).reshape(-1, 3)
+        radius = float(radius)
+        if radius <= 0.0:
+            return self.batch_query_label(centers) != 0
+
         step = float(self.voxel_size)
-
-        # Grid extents in each direction
         num = int(np.ceil(2.0 * radius / step)) + 1
-        xs = np.linspace(cx - radius, cx + radius, num=num)
-        ys = np.linspace(cy - radius, cy + radius, num=num)
-        zs = np.linspace(cz - radius, cz + radius, num=num)
-
-        XX, YY, ZZ = np.meshgrid(xs, ys, zs, indexing="xy")
-
-        dx = XX - cx
-        dy = YY - cy
-        dz = ZZ - cz
-        dist_sq = dx * dx + dy * dy + dz * dz
-        mask = dist_sq <= radius * radius
-
+        o = np.linspace(-radius, radius, num=num)
+        OX, OY, OZ = np.meshgrid(o, o, o, indexing="xy")
+        mask = OX * OX + OY * OY + OZ * OZ <= radius * radius
         if not np.any(mask):
-            # Extremely small radius or numerical issues; fall back to single-point check.
-            label = self.query_label(center)
-            return label != 0
+            return self.batch_query_label(centers) != 0
+        offsets = np.column_stack([OX[mask], OY[mask], OZ[mask]])  # (P, 3)
 
-        pts_world = np.column_stack(
-            [
-                XX[mask].ravel(),
-                YY[mask].ravel(),
-                ZZ[mask].ravel(),
-            ]
-        )
-
-        labels = self.batch_query_label(pts_world)
-        # 0 : free & reachable
-        # 1 : obstacle
-        # 2 : unreachable or out-of-bounds
-        return bool(np.any(labels != 0))
+        pts = (centers[:, None, :] + offsets[None, :, :]).reshape(-1, 3)
+        labels = self.batch_query_label(pts).reshape(centers.shape[0], -1)
+        return np.any(labels != 0, axis=1)
 

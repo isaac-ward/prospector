@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple
 
 import bpy
 import math
+import mathutils
 
 from .constants import (
     ASSET_ROTATION_OFFSET_EULER,
@@ -107,6 +108,23 @@ def set_scene_frame_range(
     bpy.context.scene.frame_end = int(end_frame)
 
 
+def compose_rotation_with_offset(rot, offset, prev_euler=None) -> mathutils.Euler:
+    """
+    World rotation = R(rot) @ R(offset): `offset` is the asset's local
+    correction (model frame -> +X forward, +Z up), `rot` the trajectory
+    attitude. Adding Euler angles component-wise (the previous approach) is
+    not a rotation composition and scrambles the axes once the offset is
+    non-zero. `prev_euler` keeps consecutive keyframes continuous, so Blender
+    never interpolates a +pi -> -pi wrap as a full spin.
+
+    For a level attitude (rot == 0) this equals `offset`, as before.
+    """
+    m = mathutils.Euler(rot, "XYZ").to_matrix() @ mathutils.Euler(offset, "XYZ").to_matrix()
+    if prev_euler is None:
+        return m.to_euler("XYZ")
+    return m.to_euler("XYZ", prev_euler)
+
+
 def keyframe_object_trajectory(
     *,
     obj: bpy.types.Object,
@@ -120,14 +138,13 @@ def keyframe_object_trajectory(
 
     obj.rotation_mode = "XYZ"
 
-    ox, oy, oz = ASSET_ROTATION_OFFSET_EULER
-
+    prev = None
     for i, (pos, rot) in enumerate(zip(positions, rotations)):
         frame = int(start_frame + i * stride)
         obj.location = pos
 
-        rx, ry, rz = rot
-        obj.rotation_euler = (rx + ox, ry + oy, rz + oz)
+        prev = compose_rotation_with_offset(rot, ASSET_ROTATION_OFFSET_EULER, prev)
+        obj.rotation_euler = prev
 
         obj.keyframe_insert(data_path="location", frame=frame)
         obj.keyframe_insert(data_path="rotation_euler", frame=frame)
@@ -399,30 +416,19 @@ def keyframe_camera_pov_from_agent(
     if len(positions) != len(rotations):
         raise ValueError("positions and rotations must have same length")
 
-    ox, oy, oz = CAMERA_EGO_ROT_OFFSET_EULER
-
     cam_obj.rotation_mode = "XYZ"
+    prev = None
     for i, (pos, rot) in enumerate(zip(positions, rotations)):
         f = int(start_frame + i * stride)
         cam_obj.location = pos
-        # Offset it slightly forward in the direction of the next position
-        next_pos = positions[min(i + 1, len(positions) - 1)]
-        direction = (
-            next_pos[0] - pos[0],
-            next_pos[1] - pos[1],
-            next_pos[2] - pos[2],
-        )
-        norm = math.sqrt(direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2)
-        if norm > EPS_NORM:
-            forward_offset = 0.25
-            dx = (direction[0] / norm) * forward_offset
-            dy = (direction[1] / norm) * forward_offset
-            dz = (direction[2] / norm) * forward_offset
-            cam_obj.location.x += dx
-            cam_obj.location.y += dy
-            cam_obj.location.z += dz
-        rx, ry, rz = rot
-        cam_obj.rotation_euler = (float(rx + ox), float(ry + oy), float(rz + oz))
+        # Offset it slightly forward along the agent's heading (the per-step
+        # displacement direction jitters when the agent hovers)
+        forward_offset = 0.25
+        yaw = float(rot[2])
+        cam_obj.location.x += math.cos(yaw) * forward_offset
+        cam_obj.location.y += math.sin(yaw) * forward_offset
+        prev = compose_rotation_with_offset(rot, CAMERA_EGO_ROT_OFFSET_EULER, prev)
+        cam_obj.rotation_euler = prev
         cam_obj.keyframe_insert(data_path="location", frame=f)
         cam_obj.keyframe_insert(data_path="rotation_euler", frame=f)
 

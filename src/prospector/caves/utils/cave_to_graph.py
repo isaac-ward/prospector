@@ -944,6 +944,32 @@ def build_cave_graph(
     )
 
 
+def downselect_graph(
+    cave_map: CaveMapType,
+    node_positions: np.ndarray,
+    num_nodes: int,
+    *,
+    keep_first: bool = True,
+    rng: Optional[np.random.Generator] = None,
+) -> CaveGraph:
+    """
+    Smaller graph from an existing node set: pick `num_nodes` of the given
+    nodes with the same LOS-connected farthest-point sampling used to place
+    nodes, then rebuild edges / communication matrix with
+    compute_edges_and_communication_matrix. With keep_first, the original
+    node 0 (e.g. the start node) is kept and stays node 0.
+    """
+    nodes = np.asarray(node_positions, dtype=np.float64)
+    picked = _farthest_point_sampling_los_connected(cave_map, nodes, num_nodes, rng=rng)
+    if keep_first:
+        is_first = np.all(np.isclose(picked, nodes[0]), axis=1)
+        if not is_first.any():
+            raise ValueError("Down-selection did not keep node 0; try another num_nodes or seed.")
+        picked = np.vstack([picked[is_first], picked[~is_first]])
+    edges, A, min_adj = compute_edges_and_communication_matrix(cave_map, picked, rng=rng)
+    return CaveGraph(node_positions=picked, edges=edges, A=A, min_adjacent_distance=min_adj)
+
+
 def build_and_export_cave_graph(
     cave_map: CaveMapType,
     num_nodes: int,

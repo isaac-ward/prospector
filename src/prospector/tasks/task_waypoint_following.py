@@ -62,6 +62,7 @@ class TaskWaypointFollowing:
         control_weight: float = 0.1,
         collision_penalty: float = 1e6,
         multiplier_within_radius_of_goal: float = 3.0,
+        hold_at_indices: Sequence[int] | None = None,
     ) -> None:
         """
         Parameters
@@ -93,6 +94,12 @@ class TaskWaypointFollowing:
         multiplier_within_radius_of_goal : float
             Multiplier on agent_radius to define the "goal reached" radius for
             each waypoint.
+
+        hold_at_indices : sequence of int, optional
+            Waypoint indices at which the agent must hold (keep targeting that
+            waypoint) once reached, until `release_hold(idx)` is called. Used
+            for communication rendezvous: an agent waits at a comms node until
+            it has heard from the other agent(s).
         """
         wp_np = np.asarray(waypoints, dtype=float)
         if wp_np.ndim != 2:
@@ -124,6 +131,17 @@ class TaskWaypointFollowing:
         self._cave_map = cave_map
         self._position_dims = position_dims
         self._current_subtask_idx: int = 0
+
+        # Hold points (e.g. comms rendezvous). `_holding_idx` is set once the
+        # agent has reached a hold waypoint that hasn't been released yet.
+        self._hold_indices = set(int(i) for i in (hold_at_indices or []))
+        for i in self._hold_indices:
+            if not (0 <= i < self._num_subtasks):
+                raise ValueError(
+                    f"hold index {i} out of range for {self._num_subtasks} waypoints"
+                )
+        self._released_holds: set[int] = set()
+        self._holding_idx: int | None = None
 
         # ------------------------------------------------------------------ #
         # Build per-waypoint reward + satisfaction functions                 #
@@ -303,9 +321,29 @@ class TaskWaypointFollowing:
 
         # While current subtask is satisfied and we're not at the internal last
         while idx < max_internal_idx and self._is_satisfied_fns[idx](current_state):
+            # Reached an unreleased hold point: stay on it (keep targeting
+            # this waypoint) until release_hold(idx) is called.
+            if idx in self._hold_indices and idx not in self._released_holds:
+                self._holding_idx = idx
+                break
             idx += 1
 
         self._current_subtask_idx = idx
+
+    @property
+    def holding_idx(self) -> int | None:
+        """Index of the hold waypoint the agent is waiting at, else None."""
+        return self._holding_idx
+
+    @property
+    def hold_indices(self) -> List[int]:
+        return sorted(self._hold_indices)
+
+    def release_hold(self, idx: int) -> None:
+        """Allow the agent to advance past hold waypoint `idx`."""
+        self._released_holds.add(int(idx))
+        if self._holding_idx == idx:
+            self._holding_idx = None
 
     def reward_for_active_subtask(
         self,
@@ -321,6 +359,85 @@ class TaskWaypointFollowing:
         """
         fn = self._reward_fns[self._current_subtask_idx]
         return fn(history_states, history_actions)
+
+    def batch_reward_for_active_subtask(
+        self,
+        history_states: np.ndarray,
+        history_actions: np.ndarray,
+        *,
+        num_history_states: int = 0,
+        margin_radius: float | None = None,
+        margin_penalty: float = 0.0,
+        margin_exempt_radius: float = 0.0,
+    ) -> np.ndarray:
+        """
+        Vectorized `reward_for_active_subtask` over K candidate histories.
+
+        history_states  : (K, T_s, state_dim)
+        history_actions : (K, T_a, action_dim)
+        returns         : (K,) rewards. With the default keyword arguments this
+                          is identical in definition to the per-history reward.
+
+        num_history_states : the first this-many states are the (unchangeable)
+                             past; they are excluded from the collision check
+                             so a planning margin can't make every candidate
+                             "collide" because of where the agent already was.
+        margin_radius      : optional soft safety margin (> agent_radius).
+                             Candidates coming within this radius of an
+                             obstacle (but not within agent_radius) pay
+                             `margin_penalty`. It is soft on purpose: in a
+                             corridor narrower than 2*margin_radius a hard
+                             margin makes every candidate equally
+                             "infeasible", and the planner loses the signal
+                             that keeps it off the walls.
+        margin_exempt_radius : planned states within this distance of the
+                             active waypoint skip the soft margin (the hard
+                             crash check still applies). Graph nodes can sit
+                             closer to rock than the margin; without this the
+                             margin penalty outweighs the pull of the last
+                             metre and the agent parks short of the node.
+        """
+        idx = min(self._current_subtask_idx, self._num_internal_subtasks - 1)
+        target = np.asarray(self._waypoints[min(idx, self._num_subtasks - 1)], dtype=np.float64)
+        S = np.asarray(history_states, dtype=np.float64)
+        A = np.asarray(history_actions, dtype=np.float64)
+        pos = S[:, :, list(self._position_dims)]  # (K, T, D)
+
+        distance_cost = self._distance_weight * np.sum((pos - target) ** 2, axis=(1, 2))
+        if A.ndim == 3 and A.shape[1] > 0:
+            control_cost = self._control_weight * np.sum(np.linalg.norm(A, axis=-1), axis=1)
+        else:
+            control_cost = np.zeros(S.shape[0])
+
+        check = pos[:, int(num_history_states):]
+
+        def collisions(radius: float) -> np.ndarray:
+            """(K, T) per-state collision flags for the checked states."""
+            K, T, D = check.shape
+            if T == 0:
+                return np.zeros((K, 0), dtype=bool)
+            if hasattr(self._cave_map, "batch_is_collision_within_radius"):
+                return self._cave_map.batch_is_collision_within_radius(
+                    check.reshape(-1, D), radius
+                ).reshape(K, T)
+            return np.array(
+                [
+                    [self._cave_map.is_collision_within_radius(p, radius) for p in traj]
+                    for traj in check
+                ]
+            )
+
+        collision_cost = np.where(collisions(self._agent_radius).any(axis=1), self._collision_penalty, 0.0)
+        if margin_radius is not None and margin_penalty > 0.0:
+            in_margin = collisions(float(margin_radius))
+            if margin_exempt_radius > 0.0:
+                near_goal = np.linalg.norm(check - target, axis=-1) <= float(margin_exempt_radius)
+                in_margin = in_margin & ~near_goal
+            collision_cost = collision_cost + np.where(
+                in_margin.any(axis=1), float(margin_penalty), 0.0
+            )
+
+        return -(distance_cost + control_cost + collision_cost)
 
     @property
     def reward_functions(self) -> List[RewardFn]:

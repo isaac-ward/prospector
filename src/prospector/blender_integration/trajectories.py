@@ -35,7 +35,10 @@ def load_agent_trajectory(
     smooth_positions_factor: int = 16,
     smooth_rotations: bool = True,
     smooth_rotations_factor: int = 8,
+    dt: float = 0.1,
 ) -> AgentTrajectory:
+    # dt: simulation time step between states (dynamics.<model>.dt); used to
+    # get physical velocities / accelerations when inferring attitude.
     payload = load_agent_json(json_path)
     states, actions = parse_states_actions(payload)
 
@@ -52,7 +55,8 @@ def load_agent_trajectory(
         positions.append((x, y, z))
 
         if len(s) >= 6:
-            rx, ry, rz = float(s[3]), float(s[4]), float(s[5])
+            # Dynamics3D state is [x, y, z, yaw, pitch, roll, ...]
+            rz, ry, rx = float(s[3]), float(s[4]), float(s[5])
             rotations.append((rx, ry, rz))
 
     # Compute and report the average distance between positions
@@ -64,6 +68,14 @@ def load_agent_trajectory(
         total_dist += dist
     avg_dist = total_dist / max(1, len(positions) - 1)
     print(f"[load_agent_trajectory] Loaded trajectory for agent_id={infer_agent_id(json_path)} with {len(positions)} steps, avg step distance={avg_dist:.4f} (divide by dt for average speed)")
+
+    # Trajectories that carry their own attitude come from the full rigid-body
+    # model: they are physically smooth already, and averaging would cut
+    # corners (possibly through rock) and lag the true motion. Use them as is.
+    has_attitude = len(rotations) == len(positions)
+    if has_attitude:
+        smooth_positions = False
+        smooth_rotations = False
 
     if smooth_positions:
         smoothed_positions: List[Tuple[float, float, float]] = []
@@ -81,9 +93,9 @@ def load_agent_trajectory(
         positions = smoothed_positions
 
     if len(rotations) != len(positions):
-        rotations = compute_rotations_from_positions(positions)
-
-    if smooth_rotations:
+        # Inferred attitude is already filtered; no extra rotation smoothing.
+        rotations = compute_rotations_from_positions(positions, dt=dt)
+    elif smooth_rotations:
         rotations = smooth_euler_rotations_quat_window(rotations, window=int(smooth_rotations_factor))
 
     return AgentTrajectory(

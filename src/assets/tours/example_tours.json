@@ -1,0 +1,81 @@
+{
+ "note": "Example two-agent tour on the 25-node tunnels graph (nodes are 0-based; both agents start at node 0). contact = the agents have line of sight after that step; the benchmark makes both agents hold there until they do.",
+ "maps": [
+  {
+   "map": "Tunnels-25 example",
+   "instance": "tunnel_3d_025",
+   "agent1_path": [
+    0,
+    9,
+    18,
+    9,
+    0,
+    16,
+    1,
+    16,
+    0
+   ],
+   "agent2_path": [
+    0,
+    19,
+    2,
+    19,
+    0,
+    19,
+    2,
+    20,
+    3
+   ],
+   "steps": [
+    {
+     "step": 1,
+     "agent1": 9,
+     "agent2": 19,
+     "contact": false
+    },
+    {
+     "step": 2,
+     "agent1": 18,
+     "agent2": 2,
+     "contact": false
+    },
+    {
+     "step": 3,
+     "agent1": 9,
+     "agent2": 19,
+     "contact": false
+    },
+    {
+     "step": 4,
+     "agent1": 0,
+     "agent2": 0,
+     "contact": true
+    },
+    {
+     "step": 5,
+     "agent1": 16,
+     "agent2": 19,
+     "contact": false
+    },
+    {
+     "step": 6,
+     "agent1": 1,
+     "agent2": 2,
+     "contact": false
+    },
+    {
+     "step": 7,
+     "agent1": 16,
+     "agent2": 20,
+     "contact": false
+    },
+    {
+     "step": 8,
+     "agent1": 0,
+     "agent2": 3,
+     "contact": false
+    }
+   ]
+  }
+ ]
+}

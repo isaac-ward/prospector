@@ -38,6 +38,10 @@ class Dynamics3DLinear(BaseDynamics):
     - No gravity, no dynamics coupling — purely kinematic.
     """
 
+    # `step` broadcasts over a leading batch dimension, so MPPI can roll out
+    # all samples at once.
+    supports_batched_step = True
+
     def __init__(
         self,
         *,

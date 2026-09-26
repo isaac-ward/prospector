@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -68,6 +69,15 @@ def main(args: DictConfig):
     render = bool(blender_cfg.render)
     first_n = blender_cfg.render_first_n_frames
     skip_existing = bool(blender_cfg.skip_existing_renders)
+    # Real-time playback: keyframes every video_fps * dt frames (null = one
+    # frame per sim step, as before)
+    video_fps = blender_cfg.get("video_fps", None)
+    sim_dt = float(args.dynamics[args.simulation.dynamics_model].dt)
+    # Which cameras to render (null = all) and whether to render only the
+    # final frame (completed paths)
+    views = blender_cfg.get("views", None)
+    views = list(views) if views is not None else None
+    render_last_frame_only = bool(blender_cfg.get("render_last_frame_only", False))
 
     # Resolve paths
     blender_exe = _resolve_blender_executable(str(blender_exe))
@@ -105,7 +115,11 @@ def main(args: DictConfig):
         f"log_folder=r'{log_folder}', "
         f"render={str(render)}, "
         f"render_first_n_frames={('None' if first_n is None else int(first_n))}, "
-        f"skip_existing_renders={str(skip_existing)}"
+        f"skip_existing_renders={str(skip_existing)}, "
+        f"video_fps={('None' if video_fps is None else int(video_fps))}, "
+        f"sim_dt={sim_dt}, "
+        f"views={views!r}, "
+        f"render_last_frame_only={render_last_frame_only}"
         ");"
     )
 

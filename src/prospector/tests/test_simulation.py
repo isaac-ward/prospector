@@ -25,7 +25,7 @@ from prospector.dynamics.dynamics_3d import Dynamics3D
 
 from prospector.agents.initial_states import sample_initial_states
 from prospector.agents.policies.policy_random import PolicyRandom
-from prospector.agents.policies.policy_mppi import PolicyMPPI
+from prospector.agents.policies.mppi_factory import make_mppi_policies
 from prospector.agents.agent_multi import MultiAgent
 from prospector.agents.colors import get_agent_color_list
 from prospector.environment.environment import ProspectorEnvironment
@@ -90,7 +90,8 @@ def main(args: DictConfig):
     dt = float(dyn_cfg.dt)
     #physical_parameters = dyn_cfg.physical_parameters
 
-    dynamics = dyn_class(dt=dt)
+    # from_config also loads physical / controller parameters (Dynamics3D)
+    dynamics = dyn_class.from_config(dyn_cfg) if hasattr(dyn_class, "from_config") else dyn_class(dt=dt)
 
     state_dim = int(dyn_cfg.state_dim)
     action_dim = int(dyn_cfg.action_dim)
@@ -234,23 +235,9 @@ def main(args: DictConfig):
             )
 
     elif policy_name == "policy_mppi":
-        pol_cfg = args.policies.policy_mppi
-        for i in range(num_agents):
-            pol = PolicyMPPI(
-                action_dim=action_dim,
-                action_limits=action_limits,
-                num_samples=int(pol_cfg.num_samples),
-                horizon=int(pol_cfg.horizon),
-                lambda_=float(pol_cfg.lambda_),
-                sampling_mode=str(pol_cfg.sampling_mode),
-                noise_std=float(pol_cfg.noise_std),
-                seed=seed + i,  # different seed per agent for diversity
-            )
-            pol.set_dynamics(dynamics)
-            # Each policy gets its *own* task's reward function
-            pol.set_reward_function(tasks[i].reward_for_active_subtask)
-            policies.append(pol)
-
+        # Same controller setup as the tour benchmark (per-dynamics settings,
+        # warm start, batched rollouts, safe fallback)
+        policies = make_mppi_policies(args, dynamics_name, dynamics, tasks, action_limits, seed)
     else:
         raise ValueError(
             f"Unsupported policy '{policy_name}'. "
@@ -272,7 +259,13 @@ def main(args: DictConfig):
         agents=agents,
         initial_state=initial_state,
         render=args.simulation.render.enabled,
-        render_fps=args.simulation.render.fps,
+        render_fps=int(args.simulation.render.fps),
+        # Real time: fps * dt frames per step, interpolated
+        render_frames_per_step=(
+            max(1, int(round(float(args.simulation.render.fps) * dt)))
+            if args.simulation.render.get("realtime", False)
+            else 1
+        ),
         log_dir=log_dir,
         cave_name=cave_name,
         agent_colors=agent_colors,
@@ -294,7 +287,9 @@ def main(args: DictConfig):
     # Save the information over time
     infos = []
 
-    num_steps_to_simulate_after_completion = int(args.simulation.num_steps_to_simulate_after_completion)
+    num_steps_to_simulate_after_completion = max(
+        1, int(round(float(args.simulation.seconds_to_simulate_after_completion) / dt))
+    )
     for _ in pbar:
         state, reward, done, info = env.step()  # env handles render_frame internally
         infos.append(info)
